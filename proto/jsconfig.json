@@ -1,0 +1,7 @@
+{"compilerOptions": {"baseUrl": ".", "paths": {
+  "react": ["../ui/node_modules/react"],
+  "ink": ["../ui/node_modules/ink/build/index.js"],
+  "chalk": ["../ui/node_modules/chalk/source/index.js"],
+  "ink-testing-library": ["../ui/node_modules/ink-testing-library/build/index.js"],
+  "string-width": ["../ui/node_modules/string-width/index.js"]
+}}}

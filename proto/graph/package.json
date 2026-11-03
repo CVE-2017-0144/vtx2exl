@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "ink-testing-library": "4.0.0"
+  }
+}

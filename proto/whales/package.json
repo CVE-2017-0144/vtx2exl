@@ -1,0 +1,18 @@
+{
+  "name": "vtx2exl-whales",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node demo.mjs",
+    "test": "node --test test.mjs",
+    "build": "bun build.mjs"
+  },
+  "dependencies": {
+    "ink": "5.2.1",
+    "react": "18.3.1",
+    "chalk": "5.6.2"
+  },
+  "devDependencies": {
+    "ink-testing-library": "4.0.0"
+  }
+}
