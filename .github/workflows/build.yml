@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: build-${{ github.ref }}
@@ -17,8 +19,8 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip
 
@@ -41,27 +43,46 @@ jobs:
           node tests/mo2.mjs
           (cd ui && bun test)
 
-      - name: sums
-        shell: bash
-        run: sha256sum VTX2EXL-UI.exe vtx2exl.exe > SHA256SUMS.txt
+      - name: rebuild
+        shell: cmd
+        run: |
+          git clone -q . ..\r2 || exit /b 1
+          for %%i in ("%GITHUB_WORKSPACE%\..\r2") do set R=%%~fi
+          cd /d "%R%\ui" && bun install --frozen-lockfile || exit /b 1
+          cd /d "%R%\proto" && bun install --frozen-lockfile || exit /b 1
+          call "%R%\ui\build.cmd" || exit /b 1
 
-      - uses: actions/upload-artifact@v7
+      - name: proof
+        shell: bash
+        run: node .github/proof.mjs proof ../r2
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: att
+        if: github.ref == 'refs/heads/main'
+        with:
+          subject-path: |
+            VTX2EXL-UI.exe
+            vtx2exl.exe
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vtx2exl
           path: |
             VTX2EXL-UI.exe
             vtx2exl.exe
-            SHA256SUMS.txt
+            proof/
 
       - name: draft
         if: github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.att.outputs.bundle-path }}
         run: |
           for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft) | .id'); do
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
           done
-          gh release create "v1.0.$GITHUB_RUN_NUMBER" VTX2EXL-UI.exe vtx2exl.exe SHA256SUMS.txt \
+          cp "$BUNDLE" proof/attestation.sigstore.json
+          gh release create "v1.0.$GITHUB_RUN_NUMBER" VTX2EXL-UI.exe vtx2exl.exe proof/* \
             --draft --target "$GITHUB_SHA" --title "v1.0.$GITHUB_RUN_NUMBER" --generate-notes \
-            --notes 'VTX2EXL-UI.exe: консольный интерфейс, ядро уже внутри. vtx2exl.exe: только ядро, для командной строки.'
+            --notes 'VTX2EXL-UI.exe: консольный интерфейс, ядро уже внутри. vtx2exl.exe: только ядро, для командной строки. Как проверить файлы: VERIFY.txt.'
