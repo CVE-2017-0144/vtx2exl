@@ -4,22 +4,26 @@ import {S} from './sys.js'
 import {C, Bar, Chip, Panel, spin, cut, plural, useKeys} from './kit.jsx'
 import {useMouse} from './term.js'
 
+export const NM = {vortex: 'Vortex', mo2: 'MO2'}
 const LBL = {read: 'читаю манифест vortex и сборку', scan: 'сканирую моды vortex', compare: 'сравниваю со сборкой', archives: 'читаю архивы',
   scc: 'проверяю скрипты', copy: 'копирую моды', write: 'записываю сборку', purge: 'убираю в карантин'}
+const LM = {read: 'читаю профиль mo2 и сборку', scan: 'сканирую моды mo2'}
+const lbl = (s, id) => s == 'mo2' && LM[id] || LBL[id]
 const add = (j, k, s) => { j.log.push({k, s: String(s)}); if (j.log.length > 6000) j.log.splice(0, 1000) }
 export const feed = (j, e) => {
   switch (e.t) {
-    case 'start': j.st = e; break
+    case 'start': j.st = e; j.src = e.source || j.src; break
     case 'phase': {
       for (const p of j.ph) if (p.s == 1) p.s = 2
       let p = j.ph.find(p => p.id == e.id)
       if (!p) j.ph.push(p = {id: e.id})
-      Object.assign(p, {label: e.label || LBL[e.id] || e.id, s: 1, d: 0, t: null, it: ''})
+      Object.assign(p, {label: e.label || lbl(j.src, e.id) || e.id, s: 1, d: 0, t: null, it: ''})
       add(j, 'ph', p.label)
       break
     }
     case 'progress': { const p = j.ph.find(p => p.id == e.phase); if (p) p.d = e.done, p.t = e.total, p.it = e.item || ''; break }
     case 'target': j.tg = e; break
+    case 'mo2': j.mo2 = e; break
     case 'conflict': j.cf.push(e); break
     case 'mod': j.mods.push(e); break
     case 'vconf': j.vc++; break
@@ -45,7 +49,8 @@ export const useJob = () => {
   useEffect(() => () => { h.current?.kill(); clearTimeout(tm.current) }, [])
   const start = (args, phases = []) => {
     h.current?.kill()
-    const j = r.current = {args, ph: phases.map(id => ({id, label: LBL[id], s: 0, d: 0, t: null, it: ''})), log: [], cf: [], mods: [], scc: {}, vc: 0, nw: 0, ne: 0, t0: Date.now()}
+    const src = args.includes('--mo2') ? 'mo2' : 'vortex'
+    const j = r.current = {args, src, ph: phases.map(id => ({id, label: lbl(src, id), s: 0, d: 0, t: null, it: ''})), log: [], cf: [], mods: [], scc: {}, vc: 0, nw: 0, ne: 0, t0: Date.now()}
     const on = f => (...a) => { if (r.current === j) f(...a), kick() }
     h.current = S.run(args, {ev: on(e => feed(j, e)), txt: on(l => add(j, 'txt', l)), end: on(c => { if (!j.done) feed(j, {t: 'done', ok: false, code: c}); j.code = c, j.t1 = Date.now() })})
     tick()
@@ -120,18 +125,20 @@ export const JobView = ({j, h, w, top, topH = 0, keys, title}) => {
 const ACT = [['keep', 'остаются', '#4b6584'], ['add', 'добавятся', C.gr], ['replace', 'заменят', C.cy], ['add_off', 'добавятся выкл.', C.ye], ['disable', 'выключатся', C.pk], ['skip', 'пропуск', C.dm]]
 export const modCount = j => { const n = {}; for (const m of j?.mods || []) n[m.action] = (n[m.action] || 0) + 1; return n }
 export const SUM_H = 4
+export const sumH = j => SUM_H + !!j?.mo2
 export const Summary = ({j, w}) => {
   const s = j?.sum
   if (!s) return null
-  const n = modCount(j), tot = j.mods.length || 1, bw = Math.max(10, w - 4), f = j.scc.final, b = j.scc.base
+  const n = modCount(j), tot = j.mods.length || 1, bw = Math.max(10, w - 4), f = j.scc.final, b = j.scc.base, o = j.mo2
   let acc = 0
   const seg = ACT.map(([a, , c]) => { const x0 = Math.round(acc / tot * bw); acc += n[a] || 0; return [Math.round(acc / tot * bw) - x0, c] })
   const bad = [s.cut && `выкинуто на циклах ${s.cut}`, s.broken && `битых модов ${s.broken}`, s.stale && `записей манифеста не сходится ${s.stale}`].filter(Boolean)
-  return <Box flexDirection="column" flexShrink={0} height={SUM_H}>
+  return <Box flexDirection="column" flexShrink={0} height={sumH(j)}>
     <Text>{seg.map(([x, c], i) => <Text key={i} color={c}>{'█'.repeat(Math.max(0, x))}</Text>)}</Text>
     <Text wrap="truncate">{ACT.filter(([a]) => n[a]).map(([a, l, c]) => <Text key={a}><Text color={c}>■ </Text><Text color={C.tx}>{l} </Text><Text color={c} bold>{n[a]}</Text>{'   '}</Text>)}</Text>
-    <Text wrap="truncate" color={C.dm}>споры: <Text color={C.tx}>дублей {s.dups} · пар по файлам {s.pairs} · архивов {s.archives}</Text> · внутри Vortex {s.vconf} · одинаковых файлов {s.same}</Text>
+    <Text wrap="truncate" color={C.dm}>споры: <Text color={C.tx}>дублей {s.dups} · пар по файлам {s.pairs} · архивов {s.archives}</Text> · внутри {NM[j.src]} {s.vconf} · одинаковых файлов {s.same}</Text>
     <Text wrap="truncate" color={C.dm}>скрипты: {f ? f.ok ? <Text color={C.gr}>√ компилируются</Text> : <Text color={C.rd}>× {plural(f.errors, 'ошибка', 'ошибки', 'ошибок')}{b ? ` (в сборке до переноса: ${b.errors})` : ''}</Text> : <Text>не проверялись</Text>}
       {bad.length ? <Text color={C.ye}>{'   ! ' + bad.join(' · ')}</Text> : null}</Text>
+    {o ? <Text wrap="truncate" color={C.dm}>MO2 <Text color={C.tx}>{o.profile}</Text>: включено {o.on}, выключено {o.off} · разделителей {o.separators} · overwrite: {plural(o.overwrite, 'файл', 'файла', 'файлов')}, мусора {o.junk}</Text> : null}
   </Box>
 }

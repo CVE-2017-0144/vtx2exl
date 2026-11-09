@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {execFileSync} from 'node:child_process'
-import {exfix, plan, commit} from './sys.js'
+import {exfix, plan, commit, S, PROCS} from './sys.js'
 
 const CAT = 'Vortex', DIR = 'Mod "A" - ё', ID = JSON.stringify(DIR)
 const STATE = `﻿{\r\n  "buildName": "B",  "savedAt":"2026-10-30T01:02:03.1234567+03:00",\r\n  "activations": [\r\n    {"categoryName":"Vortex","folderName":"Other","enabled":true,"order":0},\r\n    { "enabled" : true , "order":1.50, "folderName": ${ID}, "categoryName": "VORTEX", "x": {"enabled": true} }\r\n  ]\r\n}\r\n`
@@ -276,4 +276,24 @@ test('ошибка записи второго файла: первый отка
   } finally { execFileSync('attrib', ['-R', f2]) }
   expect(onDisk()).toEqual([STATE, PROF])
   clean()
+})
+
+test('MO2: инстансы только Cyberpunk, портативная папка, профили и путь игры', () => {
+  const mk = (d, name, ini, pf = []) => { const b = path.join(tmp, d); fs.mkdirSync(b, {recursive: true}); fs.writeFileSync(path.join(b, 'ModOrganizer.ini'), `[General]\r\ngameName=${name}\r\n${ini}`); for (const p of pf) fs.mkdirSync(path.join(b, 'profiles', p), {recursive: true}), fs.writeFileSync(path.join(b, 'profiles', p, 'modlist.txt'), '') }
+  const gp = 'gamePath=@ByteArray(D:\\\\Игры\\\\Cyberpunk 2077)\r\n'
+  mk('mo/Cyb', 'Cyberpunk 2077', gp + 'selected_profile=@ByteArray(Alt)\r\n', ['Default', 'Alt'])
+  mk('mo/Sky', 'Skyrim Special Edition', gp, ['Default'])
+  fs.mkdirSync(path.join(tmp, 'mo', 'empty'), {recursive: true})
+  fs.mkdirSync(path.join(tmp, 'mo', 'Cyb', 'profiles', 'junk'))
+  const l = S.mo2s(path.join(tmp, 'mo'))
+  expect(l.map(i => i.name)).toEqual(['Cyb'])
+  expect(l[0]).toMatchObject({game: 'D:\\Игры\\Cyberpunk 2077', profile: 'Alt', mods: path.join(tmp, 'mo', 'Cyb', 'mods')})
+  expect(l[0].profiles.sort()).toEqual(['Alt', 'Default'])
+  expect(S.mo2s(path.join(tmp, 'нет'))).toEqual([])
+  mk('portable', 'cyberpunk 2077', '', ['Default'])
+  expect(S.mo2(path.join(tmp, 'portable'))).toMatchObject({profile: 'Default', profiles: ['Default'], game: ''})
+  expect(S.mo2(path.join(tmp, 'mo', 'Sky'))).toBe(null)
+  expect(S.mo2(path.join(tmp, 'mo', 'empty'))).toBe(null)
+  expect(S.mo2('')).toBe(null)
+  expect(PROCS.map(p => p[0])).toContain('ModOrganizer.exe')
 })

@@ -5,13 +5,14 @@ import path from 'node:path'
 import {S, PROCS} from './sys.js'
 import {bus, gate, useMouse, useHover} from './term.js'
 import {X, useHint, C, mid, cut, plural, grad, wrap, P, useKeys, LOGO_W, Logo, Sub, useSize, Btn, Chip, Field, Panel, Steps, Header, Status, Foot, Nav, Dialog} from './kit.jsx'
-import {useJob, JobView, Summary, SUM_H, modCount} from './job.jsx'
+import {useJob, JobView, Summary, sumH, modCount, NM} from './job.jsx'
 import {CMap} from './map.jsx'
 import Whales from '../proto/whales/Whales.mjs'
 
 const PNAME = Object.fromEntries(PROCS)
 const hs = n => n < 1024 ? `${n} Б` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} КБ` : `${(n / 1048576).toFixed(1)} МБ`
 const B = ' ', DA = 'Да, записать'
+const useSrc = () => { const n = NM[useContext(X).cfg.src]; return t => t.replace(/Vortex/g, n) }
 
 const Row = ({on, onPress, children}) => {
   const r = useRef(), h = useHover(r, onPress)
@@ -20,17 +21,17 @@ const Row = ({on, onPress, children}) => {
 const Check = ({ok, t, warn}) => <Text wrap="truncate"><Text color={ok ? C.gr : warn ? C.ye : C.rd}>{ok ? '√ ' : warn ? '! ' : '× '}</Text><Text color={ok ? C.tx : warn ? C.ye : C.rd}>{t}</Text></Text>
 
 const HOME = [
-  ['mig', 'Перенос из Vortex', 'игра › сборка › режим › проверка › запись'],
-  ['map', 'Карта конфликтов', 'что с чем спорит в сборке и что с этим делать'],
+  ['mig', 'Перенос из Vortex или MO2', 'источник › сборка › режим › проверка › запись'],
+  ['map', 'Карта конфликтов', 'что с чем спорит в сборке или профиле MO2'],
   ['undo', 'Откат переноса', 'вернуть сборку как было до переноса'],
   ['purge', 'Очистка папки игры', 'убрать следы Vortex из игры в карантин'],
   ['self', 'Самопроверка', 'проверить саму программу, ничего не трогает'],
   ['quit', 'Выход', 'закрыть окно, Ctrl+C работает везде'],
 ]
 const INFO = {
-  mig: ['Переносит моды из Vortex в сборку ExLauncher: в существующую или в новую.', 'Сам найдёт игру и сборки. Ты выбираешь режим для споров, смотришь пробный прогон и конфликты, любой спор решается вручную.',
-    'Запись только после «Да» и при закрытых игре, лаунчере и Vortex. Перед записью бэкап, перенос можно откатить.'],
-  map: ['Показывает, какие моды сборки спорят за одни файлы, что сломается, что вылетит и кто победит.', 'Объясняет простым языком и рисует граф связей: клавиатура и мышь.', 'Сама ничего не меняет. Выключить мод можно кнопкой, после подтверждения.'],
+  mig: ['Переносит моды из Vortex или Mod Organizer 2 в сборку ExLauncher: в существующую или в новую.', 'Сам найдёт игру, инстансы MO2 и сборки. Ты выбираешь источник и режим для споров, смотришь пробный прогон и конфликты, любой спор решается вручную.',
+    'Запись только после «Да» и при закрытых игре, лаунчере, Vortex и MO2. Перед записью бэкап, перенос можно откатить.'],
+  map: ['Показывает, какие моды сборки или профиля MO2 спорят за одни файлы, что сломается, что вылетит и кто победит.', 'Объясняет простым языком и рисует граф связей: клавиатура и мышь.', 'Сама ничего не меняет. В сборке мод можно выключить кнопкой, после подтверждения. Профиль MO2 карта только читает.'],
   undo: ['Возвращает json сборки из бэкапа последнего переноса.', 'Перенесённые моды переезжают в _vtx2exl.undone, ничего не удаляется.', 'Всё, что меняли в лаунчере после переноса, пропадёт.'],
   purge: ['Находит файлы, которые Vortex развернул в папку игры, и убирает их в карантин.', 'Подменённые ванильные файлы остаются в игре, изменённые после deploy не трогаются.', 'Сначала план, потом «Да».'],
   self: ['Прогоняет встроенные проверки vtx2exl: разбор json, имена модов, порядок загрузки, решения конфликтов.', 'Игру и сборки не трогает.'],
@@ -58,9 +59,9 @@ const Home = ({open, solo}) => {
   const go = i => open(HOME[i][0])
   useKeys((ch, k) => k.upArrow ? set(s => (s + n - 1) % n) : k.downArrow ? set(s => (s + 1) % n) : k.return ? go(sel) : k.escape || ch == 'q' ? open('quit') : /^[1-6]$/.test(ch) ? go(+ch - 1) : null)
   useMouse(lr, e => e.t == 'wheel' ? set(s => Math.max(0, Math.min(n - 1, s + e.d))) : false)
-  const lw = solo ? LOGO_W : Math.min(58, Math.max(44, W * 0.5 | 0)), rw = W - lw - 1, iw = rw - 6, g = S.game(cfg.game), bs = cfg.builds
+  const lw = solo ? LOGO_W : Math.min(58, Math.max(44, W * 0.5 | 0)), rw = W - lw - 1, iw = rw - 6, g = S.game(cfg.game), bs = cfg.builds, mo = cfg.insts
   const av = bh - (solo ? 8 : 0), tall = av >= n * 4, gap = !tall && av >= n * 3
-  const ph = IH(rw - 4) + 6, wh = bh - ph
+  const ph = IH(rw - 4) + 7, wh = bh - ph
   return <Box height={bh}>
     <Box flexDirection="column" width={lw} flexShrink={0}>
       {solo ? <><Logo /><Sub /><Text> </Text></> : null}
@@ -74,22 +75,29 @@ const Home = ({open, solo}) => {
         <Text color={C.fn}>{'─'.repeat(Math.max(0, rw - 4))}</Text>
         <Check ok={g.exe} t={cfg.game ? 'игра: ' + mid(cfg.game, iw - 8) : 'игра не найдена'} />
         <Check ok={g.dep} warn t={g.dep ? 'Vortex развернул моды в игру' : 'нет vortex.deployment.json'} />
+        <Check ok={!!mo.length} warn t={mo.length ? 'MO2: ' + mo.map(i => i.name).join(', ') : 'инстансы MO2 не найдены'} />
         <Check ok={!!bs.length} warn t={bs.length ? 'сборки: ' + bs.map(b => `${b.title} (${b.mods ?? '?'})`).join(', ') : 'сборки ExLauncher не найдены'} />
       </Panel>
     </Box>
   </Box>
 }
 
-const GameStep = ({h, next, back}) => {
+const SrcRow = () => {
+  const {cfg, set} = useContext(X)
+  return <Box><Text color={C.dm}>Откуда  </Text>{Object.entries(NM).map(([k, n]) => <Chip key={k} label={n} on={cfg.src == k} col={C.pk} onPress={() => set({src: k})} />)}<Text color={C.fn}>Tab</Text></Box>
+}
+
+const GameStep = ({h, next, back, src}) => {
   const {cfg, set, W} = useContext(X), gs = cfg.games
   const [v, setV] = useState(cfg.game || gs[0] || '')
   const p = v.trim(), g = S.game(p), ok = g.exe && g.dep, sel = gs.findIndex(x => x.toLowerCase() == p.toLowerCase())
   const go = () => { if (!ok) return; if (p != cfg.game) set({game: p, builds: S.builds(p), build: ''}); next() }
   const pick = d => gs.length && setV(gs[((sel < 0 ? 0 : sel + d) + gs.length) % gs.length])
-  useHint('↑↓ найденные · печатай или вставь путь (правый клик / Ctrl+V) · Ctrl+U очистить · Enter далее · Esc назад')
-  useKeys((ch, k) => k.upArrow ? pick(-1) : k.downArrow ? pick(1) : k.return ? go() : k.escape ? back() : null)
+  useHint('↑↓ найденные · печатай или вставь путь (правый клик / Ctrl+V) · Ctrl+U очистить · ' + (src ? 'Tab источник · ' : '') + 'Enter далее · Esc назад')
+  useKeys((ch, k) => k.upArrow ? pick(-1) : k.downArrow ? pick(1) : k.return ? go() : k.escape ? back() : k.tab && src ? set({src: 'mo2'}) : null)
   return <Box flexDirection="column" height={h}>
     <Panel title="Папка игры" flexGrow={1}>
+      {src && cfg.ask ? <><SrcRow /><Text>{B}</Text></> : null}
       <Text color={C.dm}>Найдено автоматически:</Text>
       {gs.length ? gs.map((x, i) => <Row key={x} on={i == sel} onPress={() => setV(x)}><Text wrap="truncate" color={i == sel ? '#ffffff' : C.tx}>{mid(x, W - 12)}</Text></Row>)
         : <Text color={C.ye}>  ничего, укажи путь вручную</Text>}
@@ -106,8 +114,41 @@ const GameStep = ({h, next, back}) => {
   </Box>
 }
 
+const Mo2Step = ({h, next, back}) => {
+  const {cfg, set, W} = useContext(X), is = cfg.insts
+  const [v, setV] = useState(cfg.mo || is[0]?.dir || ''), [pf, setPf] = useState(cfg.pf)
+  const p = v.trim(), m = S.mo2(p), g = m && S.game(m.game), ps = m?.profiles || [], cur = ps.includes(pf) ? pf : ps.includes(m?.profile) ? m.profile : ps[0]
+  const sel = m ? is.findIndex(x => x.dir.toLowerCase() == m.dir.toLowerCase()) : -1, ok = !!g?.exe && !!cur
+  const edit = x => (setV(x), setPf(''))
+  const pick = d => is.length && edit(is[((sel < 0 ? 0 : sel + d) + is.length) % is.length].dir)
+  const cyc = d => ps.length && setPf(ps[(ps.indexOf(cur) + d + ps.length) % ps.length])
+  const go = () => { if (!ok) return; set({mo: m.dir, pf: cur, ...(m.game != cfg.game ? {game: m.game, builds: S.builds(m.game), build: ''} : {})}); next() }
+  useHint('↑↓ найденные · печатай или вставь папку · ←→ профиль · Ctrl+U очистить · Tab источник · Enter далее · Esc назад')
+  useKeys((ch, k) => k.upArrow ? pick(-1) : k.downArrow ? pick(1) : k.leftArrow ? cyc(-1) : k.rightArrow ? cyc(1) : k.return ? go() : k.escape ? back() : k.tab ? set({src: 'vortex'}) : null)
+  return <Box flexDirection="column" height={h}>
+    <Panel title="Инстанс Mod Organizer 2" flexGrow={1}>
+      {cfg.ask ? <><SrcRow /><Text>{B}</Text></> : null}
+      <Text color={C.dm}>Найдено автоматически:</Text>
+      {is.length ? is.map((x, i) => <Row key={x.dir} on={i == sel} onPress={() => edit(x.dir)}><Text wrap="truncate" color={i == sel ? '#ffffff' : C.tx}>{x.name}<Text color={C.dm}>  {mid(x.dir, W - 24)}</Text></Text></Row>)
+        : <Text color={C.ye}>  ничего, укажи папку вручную (у портативного MO2 это папка с ModOrganizer.ini)</Text>}
+      <Text>{B}</Text>
+      <Text color={C.dm}>Папка инстанса:</Text>
+      <Field value={v} onChange={edit} focus w={W - 6} ph="D:/MO2/Cyberpunk" bad={!!p && !m} />
+      <Text>{B}</Text>
+      <Box><Text color={C.dm}>Профиль  </Text>{ps.map(x => <Chip key={x} label={x} on={x == cur} col={C.pk} onPress={() => setPf(x)} />)}{ps.length ? null : <Text color={C.fn}>нет</Text>}</Box>
+      <Text>{B}</Text>
+      <Check ok={!!m} t={m ? 'ModOrganizer.ini на месте: ' + m.gameName : 'нет ModOrganizer.ini для Cyberpunk 2077: это не папка инстанса'} />
+      <Check ok={!!g?.exe} t={g?.exe ? 'игра: ' + mid(m.game, W - 14) : 'нет игры по пути из инстанса'} />
+      <Check ok={!!cur} t={cur ? 'modlist.txt профиля на месте' : 'нет профиля с modlist.txt'} />
+      <Box flexGrow={1} />
+      <Text color={C.dm} wrap="truncate">MO2 ничего не кладёт в игру: переносятся моды профиля и Overwrite, порядок берётся из приоритетов.</Text>
+    </Panel>
+    <Nav back={back} next={go} dis={!ok} />
+  </Box>
+}
+
 const BuildStep = ({h, next, back, undo, title}) => {
-  const {cfg, set, W} = useContext(X), bs = cfg.builds, root = useMemo(() => S.roots(cfg.game)[0], [cfg.game]), n = bs.length + (undo || !root ? 0 : 1)
+  const {cfg, set, W} = useContext(X), vx = useSrc(), bs = cfg.builds, root = useMemo(() => S.roots(cfg.game)[0], [cfg.game]), n = bs.length + (undo || !root ? 0 : 1)
   const [sel, setSel] = useState(() => { const i = bs.findIndex(b => b.dir == cfg.build); return i >= 0 ? i : cfg.nb && !undo ? bs.length : 0 })
   const [nb, setNb] = useState(cfg.nb || '')
   const isNew = !undo && !!root && sel == bs.length
@@ -125,12 +166,12 @@ const BuildStep = ({h, next, back, undo, title}) => {
       {!bs.length ? <Text color={C.ye}>  Сборки ExLauncher не найдены рядом с библиотеками Steam.</Text> : null}
       {!undo && root ? <Row on={isNew} onPress={() => setSel(bs.length)}>
         <Text color={isNew ? '#ffffff' : C.tx} bold>+ Новая сборка</Text>
-        {isNew ? <Box><Text color={C.dm}>имя папки </Text><Field value={nb} onChange={setNb} focus w={34} ph="MyBuild" bad={!!nb && !!err} /></Box> : <Text color={C.dm}>создать отдельную сборку только из модов Vortex</Text>}
+        {isNew ? <Box><Text color={C.dm}>имя папки </Text><Field value={nb} onChange={setNb} focus w={34} ph="MyBuild" bad={!!nb && !!err} /></Box> : <Text color={C.dm}>{vx('создать отдельную сборку только из модов Vortex')}</Text>}
       </Row> : null}
       <Box flexGrow={1} />
       {title ? null : undo ? <Text color={C.dm}>Откат вернёт json сборки из последнего бэкапа переноса.</Text>
         : isNew ? <Check ok={!err} t={err || `будет создана: ${mid(path.join(root, nb), W - 24)}`} />
-        : bs[sel] ? <Text color={C.dm} wrap="truncate">Слияние: моды Vortex добавятся в «{bs[sel].title}», перед записью бэкап json сборки.</Text> : null}
+        : bs[sel] ? <Text color={C.dm} wrap="truncate">{vx('Слияние: моды Vortex добавятся в «' + bs[sel].title + '», перед записью бэкап json сборки.')}</Text> : null}
     </Panel>
     <Nav back={back} next={go} dis={!ok} />
   </Box>
@@ -145,21 +186,21 @@ const POL = [
     ex: [['сборка', '1.4 + рус.', 1], ['Vortex', '1.2', 0], 'итог: 1.4 с русификатором']},
 ]
 const PolCard = ({p, i, on, set, w, ex}) => {
-  const r = useRef(), h = useHover(r, () => set(p.id))
+  const r = useRef(), h = useHover(r, () => set(p.id)), vx = useSrc()
   return <Box ref={r} flexDirection="column" width={w} flexShrink={0} borderStyle={on ? 'double' : 'round'} borderColor={on ? p.col : h ? C.dm : C.fn} paddingX={1} marginRight={1}>
-    <Text wrap="truncate"><Text color={on ? p.col : C.dm}>{on ? '● ' : '○ '}</Text><Text color={on ? '#ffffff' : C.tx} bold>{p.name}</Text><Text color={C.fn}>{`  ${i + 1}`}</Text></Text>
+    <Text wrap="truncate"><Text color={on ? p.col : C.dm}>{on ? '● ' : '○ '}</Text><Text color={on ? '#ffffff' : C.tx} bold>{vx(p.name)}</Text><Text color={C.fn}>{`  ${i + 1}`}</Text></Text>
     <Text color={p.tag ? C.gr : C.fn}>{p.tag || `--${p.id}`}</Text>
-    <P w={w - 4} color={on ? C.tx : C.dm}>{p.d}</P>
+    <P w={w - 4} color={on ? C.tx : C.dm}>{vx(p.d)}</P>
     <Box flexGrow={1} />
     {ex ? <Box flexDirection="column" marginTop={ex - 1}>
-      {p.ex.slice(0, 2).map(([a, v, win]) => <Text key={a} wrap="truncate"><Text color={win ? C.gr : C.rd}>{win ? '√ ' : '× '}</Text><Text color={win ? C.tx : C.dm}>{a.padEnd(7)}{v}</Text></Text>)}
-      <Text wrap="truncate" color={on ? p.col : C.dm}>► {p.ex[2]}</Text>
+      {p.ex.slice(0, 2).map(([a, v, win]) => <Text key={a} wrap="truncate"><Text color={win ? C.gr : C.rd}>{win ? '√ ' : '× '}</Text><Text color={win ? C.tx : C.dm}>{vx(a).padEnd(7)}{v}</Text></Text>)}
+      <Text wrap="truncate" color={on ? p.col : C.dm}>► {vx(p.ex[2])}</Text>
     </Box> : null}
   </Box>
 }
 
 const ModeStep = ({h, next, back}) => {
-  const {cfg, set, W} = useContext(X)
+  const {cfg, set, W} = useContext(X), vx = useSrc()
   const [xs, setXs] = useState(0), [adding, setAdding] = useState(false), [nx, setNx] = useState(''), [xe, setXe] = useState('')
   const pi = POL.findIndex(p => p.id == cfg.pol)
   const pol = i => set({pol: POL[(i + 3) % 3].id})
@@ -184,13 +225,13 @@ const ModeStep = ({h, next, back}) => {
     else if (k.return) next()
     else if (k.escape) back()
   }, {isActive: !adding})
-  const wide = W >= 96, cw = wide ? Math.floor((W - 3) / 3) - 1 : W - 2, dl = Math.max(...POL.map(p => wrap(p.d, cw - 4).length))
-  const ex = wide && 4 + dl + 3 + 10 <= h ? 4 + dl + 4 + 10 <= h ? 2 : 1 : 0, b = cfg.builds.find(x => x.dir == cfg.build), half = Math.floor((W - 1) / 2)
+  const wide = W >= 96, cw = wide ? Math.floor((W - 3) / 3) - 1 : W - 2, dl = Math.max(...POL.map(p => wrap(vx(p.d), cw - 4).length))
+  const ex = wide && 4 + dl + 3 + 10 <= h ? 4 + dl + 4 + 10 <= h ? 2 : 1 : 0, b = cfg.builds.find(x => x.dir == cfg.build), half = Math.floor((W - 1) / 2), [sl, sv] = cfg.src == 'mo2' ? ['MO2     ', `${cfg.pf} · ${cfg.mo}`] : ['Игра    ', cfg.game]
   const xo = Math.max(0, Math.min(xs - 2, cfg.xt.length - 3))
   return <Box flexDirection="column" height={h}>
     <Box flexDirection={wide ? 'row' : 'column'} flexShrink={0}>{POL.map((p, i) => wide
       ? <PolCard key={p.id} p={p} i={i} on={p.id == cfg.pol} set={id => set({pol: id})} w={cw} ex={ex} />
-      : <Row key={p.id} on={p.id == cfg.pol} onPress={() => set({pol: p.id})}><Text wrap="truncate"><Text color={p.id == cfg.pol ? p.col : C.tx} bold>{`${i + 1} ${p.name}`}</Text><Text color={C.dm}>  {p.d}</Text></Text></Row>)}
+      : <Row key={p.id} on={p.id == cfg.pol} onPress={() => set({pol: p.id})}><Text wrap="truncate"><Text color={p.id == cfg.pol ? p.col : C.tx} bold>{`${i + 1} ${vx(p.name)}`}</Text><Text color={C.dm}>  {vx(p.d)}</Text></Text></Row>)}
     </Box>
     <Box flexDirection="column" flexShrink={0}>
       <Text color={C.dm} wrap="truncate"> Всегда: ядро (RED4ext, CET, redscript, ArchiveXL, TweakXL…) остаётся из сборки, дублей не будет.</Text>
@@ -199,15 +240,15 @@ const ModeStep = ({h, next, back}) => {
     <Box height={6} marginTop={1} flexShrink={0}>
       <Panel title="Доп. папки с модами" width={half} marginRight={1} right={xe ? <Text color={C.rd} bold> {xe} </Text> : W > 80 ? <Text color={C.fn}> по папке на мод </Text> : null}>
         {cfg.xt.slice(xo, xo + 3).map((x, i) => <XRow key={x} x={x} on={xo + i == xs && !adding} w={half - 16} pick={() => setXs(xo + i)} rm={() => rm(xo + i)} />)}
-        {!cfg.xt.length ? <Text color={C.fn}>нет: переносятся только моды Vortex</Text> : null}
+        {!cfg.xt.length ? <Text color={C.fn}>{vx('нет: переносятся только моды Vortex')}</Text> : null}
         <Box flexGrow={1} />
         {adding ? <Field value={nx} onChange={v => (setNx(v), setXe(''))} focus w={half - 4} ph={xe || 'D:\Mods\manual'} onSubmit={addX} onCancel={() => (setAdding(false), setNx(''), setXe(''))} bad={!!xe} />
           : <Btn label="+ добавить папку" onPress={() => setAdding(true)} />}
       </Panel>
       <Panel title="Итог настроек" flexGrow={1} tc={C.pk}>
-        <Text wrap="truncate"><Text color={C.dm}>Игра    </Text>{mid(cfg.game, half - 14)}</Text>
+        <Text wrap="truncate"><Text color={C.dm}>{sl}</Text>{mid(sv, half - 14)}</Text>
         <Text wrap="truncate"><Text color={C.dm}>Сборка  </Text>{b ? `${b.title} · слияние` : `новая: ${cfg.nb}`}<Text color={C.dm}>{cfg.xt.length ? `   + доп. папок ${cfg.xt.length}` : ''}</Text></Text>
-        <Text wrap="truncate"><Text color={C.dm}>Режим   </Text><Text color={POL[pi].col} bold>{POL[pi].name}</Text><Text color={C.fn}>  --{cfg.pol}</Text></Text>
+        <Text wrap="truncate"><Text color={C.dm}>Режим   </Text><Text color={POL[pi].col} bold>{vx(POL[pi].name)}</Text><Text color={C.fn}>  --{cfg.pol}</Text></Text>
         <Box><Text color={C.dm}>Скрипты </Text><Chip label={cfg.chk ? '√ проверять' : '○ не проверять'} on={cfg.chk} col={C.gr} onPress={() => set({chk: !cfg.chk})} /><Text color={C.fn}>s</Text></Box>
       </Panel>
     </Box>
@@ -244,7 +285,7 @@ const choice = (e, dec) => dec[e.id] ?? e.default
 const nameOf = e => e.kind == 'dup' ? e.a.name : `${e.a.name} ←→ ${e.b.name}`
 
 const CRow = ({e, i, on, set, pick, c, chg, w}) => {
-  const r = useRef()
+  const r = useRef(), vx = useSrc()
   useMouse(r, ev => ev.t == 'move' || ev.t == 'down' && !ev.b ? (set(i), true) : false)
   const [kl, kc] = e.lock ? [lockL(e), C.dm] : KIND[e.kind] || [String(e.kind).toUpperCase(), C.mg]
   const ver = `${cut(e.a.ver || '?', 7)} ${e.newer == 'a' ? '>' : e.newer == 'b' ? '<' : '='} ${cut(e.b.ver || '?', 7)}`
@@ -253,18 +294,18 @@ const CRow = ({e, i, on, set, pick, c, chg, w}) => {
     <Text color={kc} bold>{kl.padEnd(6)}</Text>
     <Box flexGrow={1} flexBasis={0} overflow="hidden"><Text color={on ? '#ffffff' : C.tx} bold={on} wrap="truncate">{nameOf(e)}</Text></Box>
     {w > 96 ? <Text color={C.dm}>{` ${ver}`.padStart(18)} </Text> : null}
-    <Box width={34} flexShrink={0} justifyContent="flex-end">{e.options.map(o => <Chip key={o} label={OPT[o] || o} on={c == o} col={OCOL[o]} mark={o == e.default && e.options.length > 1} onPress={() => (set(i), pick(e, o))} />)}</Box>
+    <Box width={34} flexShrink={0} justifyContent="flex-end">{e.options.map(o => <Chip key={o} label={vx(OPT[o] || o)} on={c == o} col={OCOL[o]} mark={o == e.default && e.options.length > 1} onPress={() => (set(i), pick(e, o))} />)}</Box>
   </Box>
 }
-const FRow = ({f, on, c, pick, w}) => <Box flexShrink={0}>
+const FRow = ({f, on, c, pick, w, vx}) => <Box flexShrink={0}>
   <Text color={C.pk}>{on ? '► ' : '  '}</Text>
   <Box flexGrow={1} flexBasis={0} overflow="hidden"><Text wrap="truncate" color={on ? '#ffffff' : C.tx}>{f.rel}</Text></Box>
-  {w > 80 ? <Text color={C.dm}>{` сборка ${hs(f.a)} / Vortex ${hs(f.b)} `}</Text> : null}
-  <Chip label="Сборка" on={c == 'keep'} col={OCOL.keep} onPress={() => pick(f, 'keep')} /><Chip label="Vortex" on={c == 'take'} col={OCOL.take} onPress={() => pick(f, 'take')} />
+  {w > 80 ? <Text color={C.dm}>{vx(` сборка ${hs(f.a)} / Vortex ${hs(f.b)} `)}</Text> : null}
+  <Chip label="Сборка" on={c == 'keep'} col={OCOL.keep} onPress={() => pick(f, 'keep')} /><Chip label={vx('Vortex')} on={c == 'take'} col={OCOL.take} onPress={() => pick(f, 'take')} />
 </Box>
 
 const ConfStep = ({h, cf, dec, setDec, dirty, next, back}) => {
-  const {W} = useContext(X)
+  const {W} = useContext(X), vx = useSrc()
   const [q, setQ] = useState(''), [sel, setSel] = useState(0), [fm, setFm] = useState(-1), top = useRef(0), ft = useRef(0), tr = useRef()
   const rows = useMemo(() => { const s = q.toLowerCase(); return cf.filter(e => !s || [e.a.name, e.b.name, e.a.dir, e.b.dir].join('\n').toLowerCase().includes(s)).sort((a, b) => a.lock - b.lock) }, [cf, q])
   const si = Math.max(0, Math.min(sel, rows.length - 1)), cur = rows[si], cc = cur && choice(cur, dec), each = cc == 'each'
@@ -311,7 +352,7 @@ const ConfStep = ({h, cf, dec, setDec, dirty, next, back}) => {
     <Box flexShrink={0}>
       <Text color={C.dm}>Поиск </Text><Field value={q} onChange={v => (setQ(v), setSel(0))} focus={fm < 0} w={Math.min(30, W >> 2)} ph="имя мода" />
       <Box flexGrow={1} flexBasis={0} overflow="hidden"><Text color={C.dm} wrap="truncate"> {rows.length} из {cf.length} · выбор {cf.filter(e => !e.lock).length}{nman ? ` · вручную ${nman}` : ''}</Text></Box>
-      <Text color={C.dm}>Ко всем: </Text><Chip label="по режиму" onPress={() => all(null)} /><Chip label="Сборка" col={OCOL.keep} onPress={() => all('keep')} /><Chip label="Vortex" col={OCOL.take} onPress={() => all('take')} />
+      <Text color={C.dm}>Ко всем: </Text><Chip label="по режиму" onPress={() => all(null)} /><Chip label="Сборка" col={OCOL.keep} onPress={() => all('keep')} /><Chip label={vx('Vortex')} col={OCOL.take} onPress={() => all('take')} />
     </Box>
     <Box ref={tr} flexDirection="column" height={rh + 2} flexShrink={0}>
       <Panel title="Споры" flexGrow={1} right={<Text color={C.fn}>{rows.length > rh ? `${top.current + 1}-${Math.min(rows.length, top.current + rh)} ` : ''}· = выбор режима </Text>}>
@@ -321,12 +362,12 @@ const ConfStep = ({h, cf, dec, setDec, dirty, next, back}) => {
     </Box>
     {cur ? <Panel title={`${cur.lock ? lockL(cur) : KIND[cur.kind]?.[0] || cur.kind} · ${cur.name}`} height={dh} flexShrink={0} tc={cur.lock ? C.dm : KIND[cur.kind]?.[1] || C.mg}>
       <Text wrap="truncate"><Text color={OCOL.keep}>сборка </Text><Text color={C.tx}>{a.name} </Text><Text color={cur.newer == 'a' ? C.gr : C.dm}>{a.ver || 'версия ?'}{cur.newer == 'a' ? ' новее' : ''}</Text><Text color={C.dm}>{a.date ? ' · ' + a.date : ''}  [{a.cat}\{a.dir}]{a.addons?.length ? '  + ' + a.addons.join(', ') : ''}</Text></Text>
-      <Text wrap="truncate"><Text color={OCOL.take}>Vortex </Text><Text color={C.tx}>{b.name} </Text><Text color={cur.newer == 'b' ? C.gr : C.dm}>{b.ver || 'версия ?'}{cur.newer == 'b' ? ' новее' : ''}</Text><Text color={C.dm}>{b.date ? ' · ' + b.date : ''}  [{b.dir}]</Text></Text>
-      <Text wrap="truncate" color={C.dm}>{cur.kind == 'dup' ? `файлы: одинаковых ${cur.eq}, отличаются ${cur.files?.length ?? 0}, только в сборке ${cur.only_a}, только в Vortex ${cur.only_b}`
+      <Text wrap="truncate"><Text color={OCOL.take}>{vx('Vortex ')}</Text><Text color={C.tx}>{b.name} </Text><Text color={cur.newer == 'b' ? C.gr : C.dm}>{b.ver || 'версия ?'}{cur.newer == 'b' ? ' новее' : ''}</Text><Text color={C.dm}>{b.date ? ' · ' + b.date : ''}  [{b.dir}]</Text></Text>
+      <Text wrap="truncate" color={C.dm}>{cur.kind == 'dup' ? `файлы: одинаковых ${cur.eq}, отличаются ${cur.files?.length ?? 0}, только в сборке ${cur.only_a}, только в ${vx('Vortex')} ${cur.only_b}`
         : cur.kind == 'files' ? `спорных файлов ${cur.files?.length ?? 0}${cur.one ? ' · это один мод разных версий: только целиком' : ''}`
         : cur.kind == 'archive' ? `общих ресурсов ${cur.shared}: ${cur.a_archive} / ${cur.b_archive}` : JSON.stringify(cur)}</Text>
-      <Text wrap="truncate"><Text color={C.cy}>сейчас: </Text><Text color={C.tx}>{cur.lock ? cur.same ? 'тот же мод, файлы совпадают: переносить нечего' : 'ядро сборки, от него зависят другие моды: выбора нет' : WHAT[cur.kind]?.[cc] || cc}</Text><Text color={C.dm}>   {tipRu(cur.tip)}</Text></Text>
-      {each ? fl.slice(ft.current, ft.current + fh).map((f, i) => <FRow key={f.id} f={f} on={fm >= 0 && ft.current + i == fi} c={dec[f.id] ?? cur.default} pick={fpick} w={W} />) : null}
+      <Text wrap="truncate"><Text color={C.cy}>сейчас: </Text><Text color={C.tx}>{cur.lock ? cur.same ? 'тот же мод, файлы совпадают: переносить нечего' : 'ядро сборки, от него зависят другие моды: выбора нет' : vx(WHAT[cur.kind]?.[cc] || cc)}</Text><Text color={C.dm}>   {vx(tipRu(cur.tip))}</Text></Text>
+      {each ? fl.slice(ft.current, ft.current + fh).map((f, i) => <FRow key={f.id} f={f} on={fm >= 0 && ft.current + i == fi} c={dec[f.id] ?? cur.default} pick={fpick} w={W} vx={vx} />) : null}
     </Panel> : null}
     <Nav back={back} next={next} nl={nl}>{dirty ? <Text color={C.ye}> решения изменились, план пересчитается</Text> : null}</Nav>
   </Box>
@@ -338,7 +379,7 @@ const Apply = ({h, job, lines, title, start, phases, back, next, yl}) => {
   useEffect(() => { c.setLock(job.run); return () => c.setLock(false) }, [job.run])
   useEffect(() => { if (m == 'run' && job.j?.t1 != null) next() }, [job.j?.t1])
   useEffect(() => () => { up.current = false }, [])
-  const check = async to => { setM('chk'); const p = await S.procs(); if (!up.current) return; if (!p || p.length) setBusy(p), setM('guard'); else to() }
+  const check = async to => { setM('chk'); const p = (await S.procs())?.filter(n => n != (c.cfg.src == 'mo2' ? 'Vortex.exe' : 'ModOrganizer.exe')); if (!up.current) return; if (!p || p.length) setBusy(p), setM('guard'); else to() }
   const yes = () => check(() => { setM('run'); start() })
   const again = () => check(() => { setFoc(0); setM('ask') })
   useHint(m == 'run' ? 'идёт запись: не закрывай окно · PgUp/PgDn журнал · Tab фильтр' : m == 'guard' ? 'закрой программы · Enter проверить снова · Esc отмена' : '←→ выбор · Enter подтвердить · Esc нет')
@@ -393,12 +434,12 @@ const PH = chk => ['read', 'scan', 'compare', 'archives', ...(chk ? ['scc'] : []
 const live = d => Object.fromEntries(Object.entries(d).filter(([k]) => { const p = k.split('|'); return p.length < 3 || d[p.slice(0, 2).join('|')] == 'each' }))
 
 const Mig = ({home, open}) => {
-  const {cfg, set, bh, W} = useContext(X)
+  const {cfg, set, bh, W} = useContext(X), vx = useSrc()
   const [st, setSt] = useState(0), [dec, setDec] = useState({}), plan = useJob(), app = useJob(), pk = useRef(''), h = bh - 2
   const root = useMemo(() => S.roots(cfg.game)[0], [cfg.game])
   const bp = cfg.build || (cfg.nb && root ? path.join(root, cfg.nb) : '')
   const b = cfg.builds.find(x => x.dir == cfg.build)
-  const args = [cfg.game, bp, ...(cfg.chk ? ['--check'] : []), '--' + cfg.pol, ...cfg.xt.flatMap(x => ['--extra', x])]
+  const args = [...(cfg.src == 'mo2' ? ['--mo2', cfg.mo, '--profile', cfg.pf] : [cfg.game]), bp, ...(cfg.chk ? ['--check'] : []), '--' + cfg.pol, ...cfg.xt.flatMap(x => ['--extra', x])]
   const dl = live(dec), key = JSON.stringify([args, dl]), stale = pk.current != key
   const full = () => [...args, ...(Object.keys(dl).length ? ['--decisions', S.decide(dl)] : [])]
   const runPlan = () => { pk.current = key; plan.start(full(), PH(cfg.chk)) }
@@ -408,19 +449,19 @@ const Mig = ({home, open}) => {
   const cf = plan.j?.cf || []
   const n = modCount(plan.j), pol = POL.find(p => p.id == cfg.pol)
   let body
-  if (st == 0) body = <GameStep h={h} next={() => go(1)} back={home} />
+  if (st == 0) body = cfg.src == 'mo2' ? <Mo2Step h={h} next={() => go(1)} back={home} /> : <GameStep h={h} next={() => go(1)} back={home} src />
   else if (st == 1) body = <BuildStep h={h} next={() => go(2)} back={back} />
   else if (st == 2) body = <ModeStep h={h} next={() => go(3)} back={back} />
-  else if (st == 3) body = <PlanStep h={h} job={plan} stale={stale} run={runPlan} back={back} next={() => go(cf.length ? 4 : 5)} nl={cf.length ? `Конфликты (${cf.length})` : 'К записи'} top={<Summary j={plan.j} w={W} />} topH={SUM_H} />
+  else if (st == 3) body = <PlanStep h={h} job={plan} stale={stale} run={runPlan} back={back} next={() => go(cf.length ? 4 : 5)} nl={cf.length ? `Конфликты (${cf.length})` : 'К записи'} top={<Summary j={plan.j} w={W} />} topH={sumH(plan.j)} />
   else if (st == 4) body = <ConfStep h={h} cf={cf} dec={dec} setDec={setDec} dirty={stale} next={() => go(stale ? 3 : 5)} back={back} />
   else if (st == 5) body = <Apply h={h} job={app} back={() => go(cf.length ? 4 : 3)} next={() => go(6)} start={() => app.start([...full(), '--apply'], [...PH(true), 'copy', 'write'])}
     title={b ? `Записать перенос в сборку «${b.title}»?` : `Создать новую сборку «${cfg.nb}»?`}
     lines={[`Режим: ${pol.name}${Object.keys(dl).length ? `, решений вручную: ${Object.keys(dl).filter(k => k.split('|').length < 3).length}` : ''}`,
       `Моды: добавится ${(n.add || 0) + (n.add_off || 0)}, заменит ${n.replace || 0}, выключится ${n.disable || 0}, пропуск ${n.skip || 0}`,
-      b ? 'Перед записью будет сделан бэкап json сборки, перенос можно откатить.' : `Папка: ${mid(bp, 70)}`, 'Игра, лаунчер и Vortex должны быть закрыты.']} />
+      b ? 'Перед записью будет сделан бэкап json сборки, перенос можно откатить.' : `Папка: ${mid(bp, 70)}`, vx('Игра, лаунчер и Vortex должны быть закрыты.')]} />
   else body = <Result h={h} job={app} kind="mig" home={home} retry={() => { app.stop(); pk.current = ''; go(3) }} map={() => { const bs = S.builds(cfg.game), d = app.j.done.build; set({builds: bs, build: bs.find(x => x.dir.toLowerCase() == d?.toLowerCase())?.dir || d || cfg.build}); open('map', true) }} />
   return <Box flexDirection="column" height={bh}>
-    <Steps names={MS} cur={st} can={i => i < st && !done} go={go} W={W} />
+    <Steps names={cfg.src == 'mo2' ? ['MO2', ...MS.slice(1)] : MS} cur={st} can={i => i < st && !done} go={go} W={W} />
     {body}
   </Box>
 }
@@ -442,6 +483,15 @@ const OpPlan = ({j, kind, W}) => {
   return null
 }
 
+const Off = ({h, home, t}) => {
+  useHint('Enter или Esc назад')
+  useKeys((ch, k) => k.return || k.escape ? home() : null)
+  return <Box flexDirection="column" height={h}>
+    <Panel title="Недоступно" flexGrow={1}><Text color={C.ye}>{t}</Text></Panel>
+    <Nav back={home} />
+  </Box>
+}
+
 const Op = ({kind, home}) => {
   const {cfg, bh, W} = useContext(X)
   const [st, setSt] = useState(0), plan = useJob(), app = useJob(), pk = useRef(''), h = bh - 2
@@ -450,6 +500,7 @@ const Op = ({kind, home}) => {
   const go = i => { if (plan.run && i != 1) plan.stop(); setSt(i) }
   const back = () => st ? go(st - 1) : home()
   const p = plan.j?.purge
+  if (kind == 'purge' && cfg.src == 'mo2') return <Off h={bh} home={home} t="Очистка нужна только после Vortex: MO2 не кладёт файлы в папку игры. Источник меняется в «Перенос из Vortex или MO2» клавишей Tab." />
   let body
   if (st == 0) body = undo ? <BuildStep h={h} undo next={() => go(1)} back={home} /> : <GameStep h={h} next={() => go(1)} back={home} />
   else if (st == 1) body = <PlanStep h={h} job={plan} stale={pk.current != key} run={() => { pk.current = key; plan.start(args, undo ? [] : ['scan']) }} back={back} next={() => go(2)} nl={undo ? 'К откату' : 'К очистке'} top={<OpPlan j={plan.j} kind={kind} W={W} />} topH={4} />
@@ -478,18 +529,20 @@ const Self = ({home}) => {
 }
 
 const MapRoute = ({home, skip}) => {
-  const {cfg, bh, W} = useContext(X), [st, setSt] = useState(skip || cfg.game && cfg.builds.length == 1 ? 2 : cfg.game ? 1 : 0), h = bh - 2
+  const {cfg, bh, W} = useContext(X), mo = cfg.src == 'mo2' && !skip, h = bh - 2
+  const [st, setSt] = useState(skip || (cfg.src == 'mo2' ? cfg.mo : cfg.game && cfg.builds.length == 1) ? 2 : cfg.game && cfg.src != 'mo2' ? 1 : 0), cur = mo ? st >> 1 : st
   return <Box flexDirection="column" height={bh}>
-    <Steps names={['Игра', 'Сборка', 'Карта']} cur={st} can={i => i < st} go={setSt} W={W} />
-    {st == 0 ? <GameStep h={h} next={() => setSt(1)} back={home} />
+    <Steps names={mo ? ['Инстанс', 'Карта'] : ['Игра', 'Сборка', 'Карта']} cur={cur} can={i => i < cur} go={i => setSt(mo ? i * 2 : i)} W={W} />
+    {mo ? st ? <CMap h={h} back={() => setSt(0)} mo /> : <Mo2Step h={h} next={() => setSt(2)} back={home} />
+      : st == 0 ? <GameStep h={h} next={() => setSt(1)} back={home} src />
       : st == 1 ? <BuildStep h={h} undo title="Какую сборку разобрать" next={() => setSt(2)} back={home} />
       : <CMap h={h} back={home} />}
   </Box>
 }
 
 const init = () => {
-  const games = S.games(), game = games[0] || '', builds = game ? S.builds(game) : []
-  return {games, game, builds, build: (builds.find(b => /^exposition$/i.test(b.leaf)) || builds[0])?.dir || '', nb: '', pol: 'vortex', xt: [], chk: true}
+  const games = S.games(), game = games[0] || '', builds = game ? S.builds(game) : [], insts = S.mo2s(), dep = games.some(g => S.game(g).dep)
+  return {games, game, builds, build: (builds.find(b => /^exposition$/i.test(b.leaf)) || builds[0])?.dir || '', nb: '', pol: 'vortex', xt: [], chk: true, insts, src: !dep && insts.length ? 'mo2' : 'vortex', ask: dep == !!insts.length, mo: '', pf: ''}
 }
 
 export const App = () => {

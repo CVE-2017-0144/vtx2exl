@@ -135,7 +135,7 @@ export const Header = ({band, paused, ...p}) => <Box flexDirection="column" flex
     <Whales width={p.W - LOGO_W - 2} height={8} paused={paused} />
   </Box> : <Box>
     <Text>{grad('▓▒░ VTX2EXL ░▒▓')}</Text>
-    <Text color={C.dm} wrap="truncate">{p.W > 70 ? '  Vortex ► ExLauncher · Cyberpunk 2077' : ''}</Text>
+    <Text color={C.dm} wrap="truncate">{p.W > 70 ? '  Vortex / MO2 ► ExLauncher · Cyberpunk 2077' : ''}</Text>
   </Box>}
   <Status {...p} />
 </Box>
@@ -158,7 +158,7 @@ export const Dialog = ({title, lines, foc, yes, no, yl, nl = 'Нет', col = C.p
     <Text> </Text>
     {lines.map((l, i) => <P key={i} w={Math.min(84, W - 4) - 6} color={C.tx}>{l}</P>)}
     <Text> </Text>
-    {busy ? <Text color={C.cy}>{wait || 'проверяю, закрыты ли игра, лаунчер и Vortex…'}</Text> : <Box justifyContent="center">
+    {busy ? <Text color={C.cy}>{wait || 'проверяю, закрыты ли игра, лаунчер, Vortex и MO2…'}</Text> : <Box justifyContent="center">
       <Btn label={nl} w={Math.max(12, nl.length + 4)} on={!foc} onPress={no} />
       {yes ? <><Box width={2} /><Btn label={yl} w={yl.length + 6} pri on={!!foc} onPress={yes} /></> : null}
     </Box>}

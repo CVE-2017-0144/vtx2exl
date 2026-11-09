@@ -5,16 +5,19 @@ import os from 'node:os'
 import path from 'node:path'
 import {setTimeout as nap} from 'node:timers/promises'
 import exe from '../vtx2exl.exe' with {type: 'file'}
+import {inst} from '../analyzer/mo2.mjs'
 import {bus} from './term.js'
 
 export const DEF = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077'
-export const PROCS = [['Cyberpunk2077.exe', 'игра'], ['ExLauncher.exe', 'лаунчер'], ['Vortex.exe', 'Vortex']]
+export const PROCS = [['Cyberpunk2077.exe', 'игра'], ['ExLauncher.exe', 'лаунчер'], ['Vortex.exe', 'Vortex'], ['ModOrganizer.exe', 'MO2']]
 const ex = p => fs.existsSync(p)
 const uniq = a => [...new Map(a.map(x => [path.resolve(x).toLowerCase(), path.resolve(x)])).values()]
 const rj = p => { try { return JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) } catch { return null } }
 const wr = d => { try { fs.mkdirSync(d, {recursive: true}); const p = path.join(d, `.w${process.pid}`); fs.writeFileSync(p, ''); fs.rmSync(p); return true } catch { return false } }
 const BASE = [process.env.LOCALAPPDATA, os.tmpdir()].filter(Boolean).map(d => path.join(d, 'vtx2exl')).find(wr) || path.join(os.tmpdir(), 'vtx2exl')
 const CACHE = path.join(BASE, 'cache')
+const MO = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'ModOrganizer')
+const cp = i => !!i && /^cyberpunk 2077$/i.test(i.gameName)
 const self = /[\\/]bun(\.exe)?$/i.test(process.execPath) ? [process.argv[1]] : []
 const live = new Set(), dfile = path.join(os.tmpdir(), `vtx2exl-ui-${process.pid}.json`)
 const hold = c => { live.add(c); bus.emit('busy', live.size) }, free = c => { live.delete(c); bus.emit('busy', live.size) }
@@ -181,6 +184,10 @@ export const S = {
     return {dir: p, leaf: path.basename(p), title: i.displayName || path.basename(p), ver: i.version || '', mods: ok ? a.length : null,
       on: ok ? a.filter(x => x?.enabled === true || x?.enabled === '1' || x?.enabled === 'true').length : null}
   },
+  mo2s: (root = MO) => {
+    try { return fs.readdirSync(root, {withFileTypes: true}).filter(d => d.isDirectory()).map(d => inst(path.join(root, d.name))).filter(cp) } catch { return [] }
+  },
+  mo2: p => { const i = p && inst(p); return cp(i) ? i : null },
   procs: () => new Promise(r => execFile('tasklist', ['/FO', 'CSV', '/NH'], {windowsHide: true, encoding: 'latin1', maxBuffer: 16 << 20},
     (e, o) => r(e || !/^"System",/m.test(o) ? null : PROCS.map(p => p[0]).filter(n => o.toLowerCase().includes(`"${n.toLowerCase()}"`))))),
   run(args, {ev, txt, end}) {

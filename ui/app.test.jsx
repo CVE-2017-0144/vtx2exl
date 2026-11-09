@@ -1,5 +1,5 @@
 import React from 'react'
-import {test, expect, beforeEach, afterEach} from 'bun:test'
+import {test, expect, beforeEach, afterEach, afterAll} from 'bun:test'
 import {render} from 'ink-testing-library'
 import stringWidth from 'string-width'
 import stripAnsi from 'strip-ansi'
@@ -18,6 +18,8 @@ const wait = (ms = 40) => new Promise(r => setTimeout(r, ms))
 const until = async (f, ms = 3000) => { const t = Date.now(); while (!f()) { if (Date.now() - t > ms) throw new Error('timeout:' + f.toString() + [...new Set(R.frames.map(f => stripAnsi(f).split(String.fromCharCode(10))[2]))].join(' | ') + frame()); await wait(15) } }
 export const SHOTS = {}
 const real = {procs: S.procs, bin: S.bin}
+const orig = {...S}
+afterAll(() => Object.assign(S, orig))
 
 const side = (name, dir, ver, x = {}) => ({name, dir, cat: 'Mods', ver, date: '2026-05-01', nid: 0, desc: '', addons: [], ...x})
 const CF = [
@@ -49,17 +51,21 @@ const PLAN = (check, apply) => [
   {t: 'something_new', x: 1},
   {t: 'done', ok: true, code: 0, backup: apply ? 'G:\\ExMods\\_vtx2exl.backup\\Exposition-20261030-120000' : null, build: 'G:\\ExMods\\Exposition'},
 ]
+const MO2 = {t: 'mo2', instance: 'D:\\MO2\\Cyb', profile: 'Default', game: 'G:\\Game', mods: 140, on: 120, off: 20, separators: 8, overwrite: 12, junk: 300, hidden: 4, rootfold: 2}
+const MI = {dir: 'D:\\MO2\\Cyb', name: 'Cyb', gameName: 'Cyberpunk 2077', game: 'G:\\Game', profiles: ['Default', 'Alt'], profile: 'Alt'}
+const only = () => Object.assign(S, {mo2s: () => [MI], mo2: p => p == MI.dir ? MI : null, game: g => ({exe: !!g, dep: false})})
 let calls, hold, opened, saved, procs, an, fixr, fixed
 const script = a => a[0] == '--selftest' ? [{t: 'start', v: 1, mode: 'selftest'}, 'txt:selftest ok', {t: 'done', ok: true, code: 0, backup: null, build: null}]
   : a[0] == '--undo' ? [{t: 'start', mode: 'undo'}, {t: 'undo', backup: 'G:\\ExMods\\_vtx2exl.backup\\Exposition-1', category: 'Vortex', profile: null, present: true, to: 'G:\\ExMods\\_vtx2exl.undone\\Exposition-1-Vortex'},
     {t: 'done', ok: true, code: 0, backup: a.includes('--apply') ? 'G:\\ExMods\\_vtx2exl.undone\\Exposition-1-Vortex' : null, build: 'G:\\ExMods\\Exposition'}]
   : a[0] == '--purge' ? [{t: 'start', mode: 'purge'}, {t: 'phase', id: 'scan', label: 'ищу файлы vortex в игре'},
     {t: 'purge', game: 'G:\\Game', vortex: 'E:\\Vortex', files: 1534, vanilla: ['bin\\x64\\a.dll'], changed: [], gone: 2, markers: 9, broken: [], quarantine: 'G:\\_vtx2exl.purge\\20261030'}, {t: 'done', ok: true, code: 0, backup: null, build: null}]
+  : a.includes('--mo2') ? PLAN(a.includes('--check'), a.includes('--apply')).flatMap(e => e.t == 'start' ? [{...e, source: 'mo2'}, MO2] : [e])
   : PLAN(a.includes('--check'), a.includes('--apply'))
 beforeEach(() => {
   calls = [], opened = [], saved = null, procs = [], an = null, fixr = {ok: true, msg: 'ok'}, fixed = []
   Object.assign(S, {
-    games: () => ['G:\\Game'], game: g => ({exe: !!g, dep: !!g}), roots: () => ['G:\\ExMods'],
+    mo2s: () => [], mo2: () => null, games: () => ['G:\\Game'], game: g => ({exe: !!g, dep: !!g}), roots: () => ['G:\\ExMods'],
     builds: () => [{dir: 'G:\\ExMods\\Exposition', leaf: 'Exposition', title: 'Exposition', ver: '2.31-1.0', mods: 412, on: 380}],
     procs: async () => procs, open: p => opened.push(p), decide: d => (saved = d, 'T:\\dec.json'),
     exfix: async o => (fixed.push(o), fixr),
@@ -236,6 +242,65 @@ test('перенос: режимы, прогон, конфликты, решен
   expect(frame()).toContain('Анализ сборки')
   await key('esc')
   expect(frame()).toContain('Перенос из Vortex')
+})
+
+test('MO2: единственный источник, инстанс, профиль, аргументы, подписи, очистка закрыта', async () => {
+  only()
+  await start()
+  expect(frame()).toContain('Перенос из Vortex или MO2')
+  expect(frame()).toContain('MO2: Cyb')
+  await key('1')
+  expect(frame()).toContain('Инстанс Mod Organizer 2')
+  expect(frame()).not.toContain('Откуда')
+  expect(frame()).toContain('ModOrganizer.ini на месте')
+  await key('right')
+  await key('enter')
+  expect(frame()).toContain('Куда переносить')
+  expect(frame()).toContain('из модов MO2')
+  await key('enter')
+  expect(frame()).toContain('MO2 главнее')
+  expect(frame()).not.toContain('Vortex главнее')
+  await key('enter')
+  await until(() => calls.length == 1)
+  expect(calls[0]).toEqual(['--mo2', MI.dir, '--profile', 'Default', 'G:\\ExMods\\Exposition', '--check', '--vortex'])
+  hold()
+  await until(() => frame().includes('Конфликты (4)'))
+  expect(frame()).toContain('MO2 Default: включено 120')
+  expect(frame()).toContain('внутри MO2')
+  expect(frame()).toContain('12 файлов, мусора 300')
+  await key('esc')
+  await key('esc')
+  await key('esc')
+  await key('esc')
+  expect(frame()).toContain('Перенос из Vortex или MO2')
+  await key('4')
+  expect(frame()).toContain('Очистка нужна только после Vortex')
+  expect(calls.length).toBe(1)
+})
+
+test('MO2: источник на выбор, Tab, карта профиля без сборки только читает', async () => {
+  Object.assign(S, {mo2s: () => [MI], mo2: p => p == MI.dir ? MI : null})
+  await start()
+  await key('1')
+  expect(frame()).toContain('Откуда')
+  expect(frame()).toContain('Папка игры')
+  await key('tab')
+  expect(frame()).toContain('Инстанс Mod Organizer 2')
+  await key('esc')
+  await key('2')
+  expect(frame()).toContain('Инстанс Mod Organizer 2')
+  await key('enter')
+  await until(() => an)
+  expect(calls.at(-1)).toEqual(['an', {game: 'G:\\Game', mo2: MI.dir, profile: 'Alt'}])
+  an.end(g0)
+  await until(() => frame().includes('Что случилось'))
+  await wait(60)
+  const f = g0.issues[0].fix.find(f => f.do == 'disable' || f.do == 'enable')
+  await key(String(g0.issues[0].fix.indexOf(f) + 1))
+  await wait(30)
+  expect(frame()).toContain('карта только читает')
+  expect(frame()).not.toMatch(/(Выключить|Включить) мод\?/)
+  expect(fixed.length).toBe(0)
 })
 
 test('откат и очистка: план, подтверждение, запись', async () => {

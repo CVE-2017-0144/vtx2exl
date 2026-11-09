@@ -33,13 +33,13 @@ const IRow = ({e, i, on, set, g, w}) => {
 
 const Fix = ({f, i, w, run}) => <Box flexShrink={0}><Btn label={cut(`${i + 1}  ${f.label}`, w - 5)} onPress={() => run(f)} pri={f.do == 'disable' || f.do == 'enable'} /></Box>
 
-const scan = (cfg, mem) => {
-  const [, tick] = useReducer(x => x + 1, 0), r = useRef(null), key = cfg.game + '|' + cfg.build
+const scan = (cfg, mem, mo) => {
+  const [, tick] = useReducer(x => x + 1, 0), r = useRef(null), key = mo ? cfg.mo + '|' + cfg.pf : cfg.game + '|' + cfg.build
   const st = useRef(mem.current?.key == key ? {g: mem.current.g} : {t0: Date.now(), ph: []})
   const run = () => {
     r.current?.kill()
     const t0 = Date.now(), s = st.current = {t0, ph: [], p: null}
-    r.current = S.analyze({game: cfg.game, build: cfg.build}, {
+    r.current = S.analyze(mo ? {game: cfg.game, mo2: cfg.mo, profile: cfg.pf} : {game: cfg.game, build: cfg.build}, {
       prog: p => { if (st.current !== s) return; if (s.p?.phase != p.phase) s.ph.push(lab(p.phase)); s.p = p; tick() },
       end: (g, e) => { if (st.current !== s) return; r.current = null; st.current = g ? {g} : {e, t0, ph: []}; if (g) mem.current = {key, g}; tick() },
     })
@@ -75,12 +75,12 @@ const Wait = ({s, h, run, back, note}) => {
   </Box>
 }
 
-export const CMap = ({h, back}) => {
-  const {cfg, mem} = useContext(X), [s, run] = scan(cfg, mem), [note, setNote] = useState('')
-  return s.g ? <Board g={s.g} h={h} run={run} back={back} note={note} setNote={setNote} /> : <Wait s={s} h={h} run={run} back={back} note={note} />
+export const CMap = ({h, back, mo}) => {
+  const {cfg, mem} = useContext(X), [s, run] = scan(cfg, mem, mo), [note, setNote] = useState('')
+  return s.g ? <Board g={s.g} h={h} run={run} back={back} note={note} setNote={setNote} mo={mo} /> : <Wait s={s} h={h} run={run} back={back} note={note} />
 }
 
-const Board = ({g, h, run, back, note, setNote}) => {
+const Board = ({g, h, run, back, note, setNote, mo}) => {
   const {W, cfg, mem} = useContext(X), act = useRef(false)
   const [tab, setTab] = useState(0), [sv, setSv] = useState(null), [q, setQ] = useState(''), [qf, setQf] = useState(false), [sel, setSel] = useState(0), [open, setOpen] = useState()
   const [dlg, setDlg] = useState(null), [foc, setFoc] = useState(0), top = useRef(0), lr = useRef()
@@ -95,6 +95,7 @@ const Board = ({g, h, run, back, note, setNote}) => {
   const graph = iss => { setOpen(iss); setTab(1) }
   const fix = (f, iss) => {
     setFoc(0), setNote('')
+    if (mo && (f.do == 'disable' || f.do == 'enable')) return setNote('Профиль MO2 карта только читает: включай и выключай моды в самом MO2.')
     if (f.do == 'none') return setNote(f.label)
     const m = names.get(f.mod), on = f.do == 'enable'
     if (f.do != 'disable' && !on) return setDlg({t: 'Это делается вручную', l: [f.label, 'Открой ExLauncher и сделай это в сборке, потом пересчитай карту.']})
