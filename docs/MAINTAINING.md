@@ -65,6 +65,8 @@ Exe получается около 100 МБ (рантайм Bun внутри). 
 
 ## CI и релиз
 
+Шаг `proof` запускает `.github/proof.mjs` и складывает в релиз txt-файлы: суммы по 10 алгоритмам, `BUILD-INFO`, `SOURCE-TREE`, `SOURCE-SCAN`, `PE-REPORT`, зависимости и их лицензии, скан Defender, `REPRODUCE`, инструкцию `VERIFY`. Шаг `rebuild` собирает проект второй раз в чистом клоне, чтобы сравнить байты (`/Brepro` в `src/build.bat` убирает метку времени из ядра). Сборка падает, если ядро слинковано с сетевой библиотекой. На `main` дополнительно ставится подпись `actions/attest-build-provenance`, проверка: `gh attestation verify <файл> --repo <репозиторий>`. Версии actions закреплены по хэшу коммита.
+
 `.github/workflows/build.yml`. Запуск на каждый push (кроме правок только `*.md` и `LICENSE*`). Предыдущий незавершённый запуск той же ветки отменяется. Раннер `windows-latest`.
 
 1. `actions/checkout`, `oven-sh/setup-bun` с адресом baseline-сборки Bun 1.3.14.
