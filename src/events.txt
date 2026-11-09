@@ -1,14 +1,16 @@
 vtx2exl --json: stdout = NDJSON, UTF-8, one object per line, written+flushed per event. Human text goes to stderr (drain or ignore it). t = event type, null = no value.
-start    {t,v:1,mode:"migrate|undo|purge|selftest",check:bool,apply:bool,policy:"keep|take|vortex"|null,decisions:bool}
+start    {t,v:1,source:"vortex|mo2",mode:"migrate|undo|purge|selftest",check:bool,apply:bool,policy:"keep|take|vortex"|null,decisions:bool}
 phase    {t,id,label}  migrate ids: read scan compare archives scc copy write; purge ids: scan purge
 progress {t,phase,done:n,total:n|null,item}  throttled ~100ms, the last step is always sent when total is known
-target   {t,vortex,build,merge:bool,exl:n,category,profiles:n,profile}  migrate only, merge = build already exists
+target   {t,source:"vortex|mo2",vortex,build,merge:bool,exl:n,category,profiles:n,profile}  migrate only, merge = build already exists
 conflict {t,id,kind:"dup|files|archive",name,a:side,b:side,default:opt|null,choice:opt|null,options:[opt],newer:"a"|"b"|null,lock:bool,tip, +by kind}
   side    {name,dir,cat,ver,date,nid:n,desc,addons:[str]}  a = ExLauncher build mod, b = Vortex mod
   dup     +{same:bool,eq:n,only_a:n,only_b:n,files:[{rel,a:size,b:size}]}  options keep take
   files   +{one:bool,files:[{id,rel,a:size,b:size,choice:"keep|take"|null}]}  options keep take each (each = per-file ids in files[])
   archive +{shared:n,a_archive,b_archive}  options keep take both
   opt: keep = build wins, take = vortex wins, each = decide per file, both = keep both mods on. default = what the policy picks, choice = what is applied. lock = only one option. null = no policy given, nothing decided.
+mo2      {t,instance,profile,game,mods:n,on:n,off:n,separators:n,overwrite:n,junk:n,hidden:n,rootfold:n}  mo2 only, overwrite = files kept, junk = logs and caches dropped from it, hidden = .mohidden skipped, rootfold = files unfolded from root/
+verify   {t,same:n,build:n,lost:n,diff:n}  mo2 only, every file mo2 would deploy: same = same winner after the move, build = taken by the build, lost = not deployed anymore, diff = another incoming mod wins (a bug if not 0)
 mod      {t,i:n|null,from:"exl|vortex",action:"keep|disable|add|replace|add_off|skip",on:bool,name,dir,cat,ver,date,nid:n,note,src,dst|null}  i = load order (last wins), null for skip
 vconf    {t,file,loser,winner,cut:bool}  overlaps inside Vortex, resolved by its deployment
 scc      {t,stage:"base|final",ok:bool,files:n,errors:n,by:{"cat\name":n}}  only with --check/--apply
@@ -22,3 +24,4 @@ done     {t,ok:bool,code:n,backup|null,build|null}  always last; code 0 ok, 1 er
 ids      dup:<cat>/<dir>|<vortex dir>   files:<cat>/<dir>|<vortex dir>   file: <files id>|<file key>   archive:<cat>/<dir>|<vortex dir>   (lowercase)
 --decisions file.json  {"<id>":"<opt>",...}  needs --keep|--take|--vortex; missing id = policy; bad option or unused id = warn + policy. A dup choice can add/remove later files pairs: re-run the plan after changing decisions.
 --json never prompts: --apply without policy and with conflicts = error.
+source mo2: target.vortex = mods folder, mod.from "vortex" and conflict side b = the incoming mo2 mod, policy "vortex" = take the newer. --purge is refused.

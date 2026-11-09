@@ -7,6 +7,9 @@
 #include <intrin.h>
 #include <io.h>
 #include <fcntl.h>
+#include <cstdarg>
+#include <climits>
+#include <cwctype>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -25,7 +28,34 @@
 
 using namespace std;
 
-#define wprintf(...) (wprintf(__VA_ARGS__), fflush(stdout))
+static bool mo2;
+static wstring srn(wstring s, bool lat) {
+    if (!mo2) return s;
+    static const wchar_t* const fm[] = {L"вортексе", L"вортекса", L"вортексу", L"вортексом", L"вортекс", L"vortex", L"Vortex"};
+    for (int i = 0; i < (lat ? 7 : 5); i++) {
+        size_t n = wcslen(fm[i]);
+        for (size_t p = 0; (p = s.find(fm[i], p)) != wstring::npos; p += 3) s.replace(p, n, L"MO2");
+    }
+    return s;
+}
+static int pf(const wchar_t* f, ...) {
+    va_list a, c;
+    va_start(a, f);
+    int n;
+    if (!mo2) n = vwprintf(f, a);
+    else {
+        wstring g = srn(f, true);
+        va_copy(c, a);
+        wstring b(_vscwprintf(g.c_str(), c) + 1, 0);
+        va_end(c);
+        vswprintf_s(b.data(), b.size(), g.c_str(), a);
+        b.pop_back();
+        n = fputws(srn(b, false).c_str(), stdout);
+    }
+    va_end(a);
+    return n;
+}
+#define wprintf(...) (pf(__VA_ARGS__), fflush(stdout))
 
 extern "C" uint32_t crc32c_hw(uint32_t c, const void* p, size_t n);
 
@@ -318,7 +348,7 @@ struct O {
     string o = "{";
     O(const char* t = 0) { if (t) a("t", t); }
     O& k(const char* f) { return o += o.size() > 1 ? ",\"" : "\"", o += f, o += "\":", *this; }
-    O& s(const char* f, const wstring& v) { return k(f).o += js(v), *this; }
+    O& s(const char* f, const wstring& v) { return k(f).o += js(srn(v, false)), *this; }
     O& a(const char* f, const char* v) { return k(f).o += js8(v), *this; }
     O& n(const char* f, long long v) { return k(f).o += to_string(v), *this; }
     O& b(const char* f, bool v) { return k(f).o += v ? "true" : "false", *this; }
@@ -361,8 +391,9 @@ static const unordered_set<wstring> svc = {
     L"_diagnostics", L"_settings_backup", L"_releases", L"_preview", L"_stale", L"_replaced", L"_native", L"_unsorted",
     L"_optimize_backup", L"_variants"};
 
-struct F { wstring rel, key; uint64_t sz = 0; uint32_t c = 0; bool hashed = false, drop = false; };
-struct M { wstring root, cat, dir, lid, orig, name, ver, desc, date, why; long long nid = 0; bool on = false, ex = false, skip = false, off = false; int ei = -1; vector<F> f; vector<wstring> add; J aj; };
+struct F { wstring rel, key; uint64_t sz = 0; uint32_t c = 0; bool hashed = false, drop = false, up = false; };
+struct M { wstring root, cat, dir, lid, orig, name, ver, desc, date, why; long long nid = 0; bool on = false, ex = false, skip = false, off = false; int ei = -1; vector<F> f; vector<wstring> add; J aj; int pri = 0; long long fid = 0; wstring fn, url, auth; };
+static wstring fsp(const M& m, const F& f) { return m.root + (f.up ? L"\\root\\" : L"\\") + f.rel; }
 
 static wstring dllver(const wstring& p) {
     DWORD z = 0, n = GetFileVersionInfoSizeW(p.c_str(), &z);
@@ -450,6 +481,7 @@ static vector<int> order(vector<M>& ms, vector<E>& es) {
     for (int i = 0; i < n; i++) by[i] = i;
     sort(by.begin(), by.end(), [&](int a, int b) {
         if (ms[a].ex != ms[b].ex) return ms[a].ex;
+        if (ms[a].pri != ms[b].pri) return ms[a].pri < ms[b].pri;
         return ms[a].ex ? ms[a].ei < ms[b].ei : _wcsicmp(ms[a].dir.c_str(), ms[b].dir.c_str()) < 0;
     });
     for (int i : by) if (!ms[i].ex && !ms[i].on && !ms[i].skip) put[i] = 1, ret.push_back(i);
@@ -599,30 +631,231 @@ static DWORD sccrun(const wstring& lib, const wstring& t, vector<Q>& er) {
     return rc;
 }
 
-static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstring title, bool chk, const vector<wstring>& xt) {
-    wstring game = lp(ga), out = lp(oa), parent = out.substr(0, out.rfind(L'\\')), leaf = out.substr(out.rfind(L'\\') + 1);
+static wstring qv(const string& raw) {
+    wstring u = W(raw), o;
+    for (size_t i = 0; i < u.size(); i++) {
+        wchar_t c = u[i];
+        if (c == L'"') continue;
+        if (c != L'\\' || i + 1 == u.size()) { o += c; continue; }
+        wchar_t d = u[++i];
+        if (d == L'x') {
+            unsigned v = 0;
+            for (int n = 0; n < 4 && i + 1 < u.size() && iswxdigit(u[i + 1]); n++) {
+                wchar_t h = towlower(u[++i]);
+                v = v * 16 + (h <= L'9' ? h - L'0' : h - L'a' + 10);
+            }
+            o += (wchar_t)v;
+        } else o += d == L'n' ? L'\n' : d == L't' ? L'\t' : d == L'r' ? L'\r' : d;
+    }
+    if (o.size() < 12 || o.rfind(L"@ByteArray(", 0) || o.back() != L')') return o;
+    wstring in = o.substr(11, o.size() - 12), r;
+    string b;
+    for (wchar_t c : in) {
+        if (c > 0xFF) return in;
+        b += (char)c;
+    }
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, b.data(), (int)b.size(), 0, 0);
+    if (n <= 0) return in;
+    r.resize(n);
+    MultiByteToWideChar(CP_UTF8, 0, b.data(), (int)b.size(), r.data(), n);
+    return r;
+}
+
+static unordered_map<string, wstring> qini(const wstring& p) {
+    unordered_map<string, wstring> r;
+    string s = slurp(p), sec = "general";
+    if (!s.rfind("\xEF\xBB\xBF", 0)) s.erase(0, 3);
+    auto un = [](const string& k) {
+        string o;
+        for (size_t i = 0; i < k.size(); i++)
+            if (k[i] == '%' && i + 2 < k.size() && isxdigit((uint8_t)k[i + 1]) && isxdigit((uint8_t)k[i + 2])) o += (char)strtol(k.substr(i + 1, 2).c_str(), 0, 16), i += 2;
+            else o += (char)tolower((uint8_t)k[i]);
+        return o;
+    };
+    for (size_t a = 0, b; a < s.size(); a = b + 1) {
+        b = s.find('\n', a);
+        if (b == string::npos) b = s.size();
+        string l = s.substr(a, b - a);
+        while (!l.empty() && (l.back() == '\r' || l.back() == ' ' || l.back() == '\t')) l.pop_back();
+        size_t z = l.find_first_not_of(" \t");
+        if (z == string::npos || l[z] == ';') continue;
+        if (l[z] == '[' && l.back() == ']') { sec = un(l.substr(z + 1, l.size() - z - 2)); continue; }
+        size_t e = l.find('=', z);
+        if (e == string::npos) continue;
+        size_t ke = e, v = e + 1;
+        while (ke > z && (l[ke - 1] == ' ' || l[ke - 1] == '\t')) ke--;
+        while (v < l.size() && (l[v] == ' ' || l[v] == '\t')) v++;
+        r[sec + '/' + un(l.substr(z, ke - z))] = qv(l.substr(v));
+    }
+    return r;
+}
+
+static vector<pair<wstring, wchar_t>> mlist(const string& s) {
+    vector<pair<wstring, wchar_t>> r;
+    unordered_set<wstring> seen;
+    for (size_t a = 0, b; a < s.size(); a = b + 1) {
+        b = s.find('\n', a);
+        if (b == string::npos) b = s.size();
+        string l = s.substr(a, b - a);
+        if (!l.rfind("\xEF\xBB\xBF", 0)) l.erase(0, 3);
+        size_t x = l.find_first_not_of(" \t\r"), y = l.find_last_not_of(" \t\r");
+        if (x == string::npos || l[x] == '#') continue;
+        wstring u = W(l.substr(x, y - x + 1));
+        wchar_t p = L'+';
+        if (wcschr(L"+-*", u[0])) {
+            p = u[0];
+            size_t q = u.find_first_not_of(L" \t", 1);
+            if (q == wstring::npos) continue;
+            u.erase(0, q);
+        }
+        if (lc(u) != L"overwrite" && seen.insert(lc(u)).second) r.push_back({u, p});
+    }
+    return r;
+}
+
+static wstring mver(wstring v) {
+    if (v.size() > 1 && wcschr(L"fnd", v[0]) && (iswdigit(v[1]) || v[1] == L' ')) v.erase(0, v[1] == L' ' ? 2 : 1);
+    if (v.size() > 1 && (v[0] == L'v' || v[0] == L'V') && iswdigit(v[1])) v.erase(0, 1);
+    while (count(v.begin(), v.end(), L'.') > 1 && ends(v, L".0")) v.resize(v.size() - 2);
+    return v;
+}
+
+static void mmeta(M& m) {
+    if (!exists(m.root + L"\\meta.ini")) return;
+    auto q = qini(m.root + L"\\meta.ini");
+    auto g = [&](const string& k) { auto it = q.find(k); return it == q.end() ? wstring() : it->second; };
+    wstring gn = lc(g("general/gamename")), rp = lc(g("general/repository")), fl = g("general/installationfile"), v = mver(g("general/version"));
+    long long id = _wtoi64(g("general/modid").c_str());
+    m.nid = id > 0 && (gn.empty() || gn == L"cyberpunk2077") && (rp.empty() || rp == L"nexus") ? id : 0;
+    fl = fl.substr(fl.find_last_of(L"/\\") + 1);
+    if (!v.empty()) m.ver = v;
+    if (m.nid) m.fn = fl;
+    M t;
+    t.dir = fl.substr(0, fl.rfind(L'.'));
+    nm(t);
+    if (m.nid && t.nid == m.nid && !t.date.empty()) m.ver = t.ver, m.date = t.date;
+    int n = _wtoi(g("installedfiles/size").c_str());
+    for (int i = 1; i <= n; i++) {
+        string b = "installedfiles/" + to_string(i) + "\\";
+        if (_wtoi64(g(b + "modid").c_str()) == m.nid && _wtoi64(g(b + "fileid").c_str()) > 0) m.fid = _wtoi64(g(b + "fileid").c_str());
+    }
+    m.desc = g("general/comments"), m.auth = g("general/author");
+    if (!m.nid) m.url = g("general/url");
+}
+
+static size_t nhid, nfold, njunk;
+static void mfilt(vector<F>& v, bool ov) {
+    static const wchar_t* const jk[] = {L"r6\\cache\\", L"r6\\logs\\", L"red4ext\\logs\\", L"logs\\"};
+    unordered_set<wstring> seen;
+    size_t j = 0;
+    stable_partition(v.begin(), v.end(), [](const F& f) { return f.key.rfind(L"root\\", 0) != 0; });
+    for (auto& f : v) {
+        if (!f.key.rfind(L"root\\", 0)) f.key.erase(0, 5), f.rel.erase(0, 5), f.up = true, nfold++;
+        if (ends(f.key, L".mohidden")) { nhid++; continue; }
+        bool x = f.key == L"meta.ini" || f.key == L"readme.txt" || !f.key.rfind(L"fomod\\", 0) || !f.key.rfind(L".git\\", 0) || f.key.find(L"\\.git\\") != wstring::npos || f.key == L"archive\\pc\\mod\\modlist.txt";
+        if (ov) {
+            x = x || ends(f.key, L".log") || ends(f.key, L".dmp");
+            for (auto p : jk) x = x || !f.key.rfind(p, 0);
+            njunk += x;
+        }
+        if (x || !seen.insert(f.key).second) continue;
+        if (&v[j] != &f) v[j] = move(f);
+        j++;
+    }
+    v.resize(j);
+}
+
+struct MI { wstring dir, mods, over, pd, prof, game; vector<pair<wstring, wchar_t>> l; bool ord = false, saves = false, ui = false; };
+static MI miread(wstring d, const wstring& pn) {
+    wchar_t la[MAX_PATH] = L"";
+    GetEnvironmentVariableW(L"LOCALAPPDATA", la, MAX_PATH);
+    if (*la && !exists(d + L"\\ModOrganizer.ini") && exists(wstring(la) + L"\\ModOrganizer\\" + d + L"\\ModOrganizer.ini")) d = wstring(la) + L"\\ModOrganizer\\" + d;
+    d = lp(d);
+    if (!exists(d + L"\\ModOrganizer.ini")) throw Err{L"нет ModOrganizer.ini: " + disp(d)};
+    auto q = qini(d + L"\\ModOrganizer.ini");
+    auto g = [&](const char* k) { auto it = q.find(k); return it == q.end() ? wstring() : it->second; };
+    if (lc(g("general/gamename")) != L"cyberpunk 2077") throw Err{L"этот экземпляр MO2 не для Cyberpunk 2077: " + g("general/gamename")};
+    wstring base = g("settings/base_directory");
+    replace(base.begin(), base.end(), L'/', L'\\');
+    base = base.empty() ? d : lp(base);
+    auto pth = [&](const char* k, const wchar_t* df) {
+        wstring v = g(k);
+        if (v.empty()) v = wstring(L"%BASE_DIR%/") + df;
+        if (size_t p = v.find(L"%BASE_DIR%"); p != wstring::npos) v.replace(p, 10, base);
+        replace(v.begin(), v.end(), L'/', L'\\');
+        return lp(v.size() > 1 && (v[1] == L':' || v[0] == L'\\') ? v : base + L"\\" + v);
+    };
+    MI r;
+    r.dir = d, r.mods = pth("settings/mod_directory", L"mods"), r.over = pth("settings/overwrite_directory", L"overwrite"), r.game = g("general/gamepath");
+    r.prof = pn.empty() ? g("general/selected_profile") : pn;
+    if (r.prof.empty()) r.prof = L"Default";
+    wstring ps = pth("settings/profiles_directory", L"profiles");
+    r.pd = ps + L"\\" + r.prof;
+    if (!exists(r.pd + L"\\modlist.txt")) {
+        wstring ls;
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileExW((ps + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, 0, 0);
+        if (h != INVALID_HANDLE_VALUE) {
+            do if (wstring n = fd.cFileName; n != L"." && n != L".." && exists(ps + L"\\" + n + L"\\modlist.txt")) ls += (ls.empty() ? L"" : L", ") + n;
+            while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        throw Err{L"нет профиля " + r.prof + L" в MO2, есть: " + ls};
+    }
+    r.l = mlist(slurp(r.pd + L"\\modlist.txt"));
+    for (auto& [k, v] : q) r.ord = r.ord || (!k.rfind("plugins/", 0) && ends(W(k), L"enforce_archive_load_order") && lc(v) == L"true");
+    if (exists(r.pd + L"\\settings.ini")) {
+        auto s = qini(r.pd + L"\\settings.ini");
+        auto it = s.find("general/localsaves");
+        r.saves = it != s.end() && lc(it->second) == L"true" && exists(r.pd + L"\\saves");
+    }
+    r.ui = exists(r.pd + L"\\UserSettings.json");
+    return r;
+}
+
+static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstring title, bool chk, const vector<wstring>& xt, const wstring& inst, const wstring& pfl) {
+    MI mq;
+    if (mo2) mq = miread(inst, pfl);
+    const wstring snm = mo2 ? L"MO2" : L"Vortex";
+    wstring game = lp(ga.empty() ? mq.game : ga), out = lp(oa), parent = out.substr(0, out.rfind(L'\\')), leaf = out.substr(out.rfind(L'\\') + 1);
     if (!regex_match(leaf, wregex(L"[A-Za-z0-9_-]+"))) throw Err{L"имя папки сборки: только латиница, цифры, _ и -"};
     bool mg = exists(out);
     if (mg && !exists(out + L"\\_build_info.json") && !exists(out + L"\\_profiles.json") && !exists(out + L"\\_activation_state.json"))
         throw Err{L"папка есть, но это не сборка exlauncher: " + disp(out)};
+    if (mo2 && !exists(game + L"\\bin\\x64\\Cyberpunk2077.exe")) throw Err{L"не найдена игра, проверь путь в MO2 или укажи папку игры: " + disp(game)};
     if (title.empty()) title = leaf;
     jbd = disp(out);
-    ph("read", L"читаю манифест vortex и сборку");
+    ph("read", mo2 ? L"читаю профиль MO2 и сборку" : L"читаю манифест vortex и сборку");
 
-    J man = pj(slurp(game + L"\\vortex.deployment.json"));
-    J *sp = man.at("stagingPath"), *fs = man.at("files");
-    if (!sp || !fs || fs->t != J::ARR) throw Err{L"в vortex.deployment.json нет stagingPath/files"};
-    wstring stg = lp(W(sp->s));
+    wstring stg;
     unordered_map<wstring, wstring> win;
     unordered_set<wstring> dep;
-    for (auto& x : fs->v) {
-        J *rp = x.at("relPath"), *src = x.at("source"), *tg = x.at("target");
-        if (!rp || !src) throw Err{L"запись манифеста без relPath/source"};
-        if (tg && !tg->s.empty()) throw Err{L"target=\"" + W(tg->s) + L"\" в манифесте, такую раскладку не знаю"};
-        wstring r = W(rp->s), s = lc(W(src->s));
-        replace(r.begin(), r.end(), L'/', L'\\');
-        win[lc(r)] = s;
-        dep.insert(s);
+    unordered_map<wstring, int> pri;
+    vector<pair<int, wstring>> sps;
+    static const wregex rsep(L".*_separator"), rbak(L".*backup[0-9]*");
+    if (mo2) {
+        stg = mq.mods;
+        int n = (int)mq.l.size();
+        for (int i = n - 1; i >= 0; i--) {
+            auto& [s, p] = mq.l[i];
+            pri[lc(s)] = n - i;
+            if (regex_match(s, rsep)) sps.push_back({n - i, s.substr(0, s.size() - 10)});
+            else if (p != L'-' && p != L'*' && !regex_match(s, rbak)) dep.insert(lc(s));
+        }
+    } else {
+        J man = pj(slurp(game + L"\\vortex.deployment.json"));
+        J *sp = man.at("stagingPath"), *fs = man.at("files");
+        if (!sp || !fs || fs->t != J::ARR) throw Err{L"в vortex.deployment.json нет stagingPath/files"};
+        stg = lp(W(sp->s));
+        for (auto& x : fs->v) {
+            J *rp = x.at("relPath"), *src = x.at("source"), *tg = x.at("target");
+            if (!rp || !src) throw Err{L"запись манифеста без relPath/source"};
+            if (tg && !tg->s.empty()) throw Err{L"target=\"" + W(tg->s) + L"\" в манифесте, такую раскладку не знаю"};
+            wstring r = W(rp->s), s = lc(W(src->s));
+            replace(r.begin(), r.end(), L'/', L'\\');
+            win[lc(r)] = s;
+            dep.insert(s);
+        }
     }
 
     vector<M> ms;
@@ -690,24 +923,34 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
 
     WIN32_FIND_DATAW fd;
     size_t nsc = 0;
-    ph("scan", L"сканирую моды vortex");
+    ph("scan", mo2 ? L"сканирую моды MO2" : L"сканирую моды vortex");
     for (size_t ri = 0; ri <= xt.size(); ri++) {
         wstring rt = ri ? lp(xt[ri - 1]) : stg;
         HANDLE h = FindFirstFileExW((rt + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, 0, 0);
         if (h == INVALID_HANDLE_VALUE) throw Err{L"нет папки модов: " + disp(rt)};
         do {
             wstring n = fd.cFileName;
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || n == L"." || n == L".." || !n.rfind(L"__", 0)) continue;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || n == L"." || n == L".." || (!mo2 && !n.rfind(L"__", 0))) continue;
+            if (mo2 && !ri && ((fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) || regex_match(n, rsep) || regex_match(n, rbak))) continue;
             prog("scan", ++nsc, 0, n);
             M m;
             m.dir = n, m.lid = lc(n), m.on = ri || dep.count(m.lid) > 0, m.root = rt + L"\\" + n;
             nm(m);
             vector<wstring> sk;
             walk(m.root, L"", m.f, sk, false);
+            if (mo2 && !ri) {
+                if (m.lid == L"disable crashreporter (mo cet fix)") { dep.erase(m.lid); continue; }
+                auto it = pri.find(m.lid);
+                m.pri = it == pri.end() ? 0 : it->second;
+                mmeta(m);
+                mfilt(m.f, false);
+                if (m.f.empty()) dep.erase(m.lid);
+                if (m.dir[0] == L'_') m.dir = L"m" + m.dir;
+            } else if (mo2) m.pri = INT_MAX / 2;
             wstring dv;
             int nk = 0;
             for (auto& f : m.f)
-                if (!f.key.rfind(L"red4ext\\plugins\\", 0) && ends(f.key, L".dll") && count(f.key.begin(), f.key.end(), L'\\') == 3) nk++, dv = dllver(m.root + L"\\" + f.rel);
+                if (!f.key.rfind(L"red4ext\\plugins\\", 0) && ends(f.key, L".dll") && count(f.key.begin(), f.key.end(), L'\\') == 3) nk++, dv = dllver(fsp(m, f));
             if (nk == 1 && !dv.empty() && vcmp(dv, m.ver) > 0) m.ver = dv;
             for (auto& s : sk) lnk.push_back(n + L"\\" + s);
             if (!m.f.empty()) ms.push_back(move(m));
@@ -715,10 +958,23 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         FindClose(h);
     }
 
-    wstring cat = L"Vortex";
-    for (int i = 2; mg && exists(out + L"\\" + cat); i++) cat = L"Vortex" + to_wstring(i);
+    size_t nov = 0;
+    if (mo2) {
+        M m;
+        m.dir = m.name = L"MO2 Overwrite", m.lid = lc(m.dir), m.on = true, m.root = mq.over, m.pri = INT_MAX;
+        vector<wstring> sk;
+        if (exists(m.root)) walk(m.root, L"", m.f, sk, false);
+        mfilt(m.f, true);
+        nov = m.f.size();
+        if (nov) dep.insert(m.lid), ms.push_back(move(m));
+        stable_sort(ms.begin() + ne, ms.end(), [](const M& a, const M& b) { return a.pri < b.pri; });
+    }
+
+    wstring cat = snm;
+    for (int i = 2; mg && exists(out + L"\\" + cat); i++) cat = snm + (mo2 ? L"-" : L"") + to_wstring(i);
     unordered_map<wstring, int> mi;
     for (int i = ne; i < (int)ms.size(); i++) ms[i].cat = cat, mi[ms[i].lid] = i;
+    if (mo2) for (int i = ne; i < (int)ms.size(); i++) if (ms[i].on) for (auto& f : ms[i].f) win[f.key] = ms[i].lid;
     vector<wstring> gone, col;
     for (auto& s : dep) if (!mi.count(s)) gone.push_back(s);
     for (int i = ne; i < (int)ms.size(); i++)
@@ -734,7 +990,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         for (int j = 0; j < (int)ms[i].f.size(); j++) own[ms[i].f[j].key].push_back({i, j});
     auto hc = [&](int m, int j) {
         F& f = ms[m].f[j];
-        if (!f.hashed && !(f.hashed = fcrc(ms[m].root + L"\\" + f.rel, f.c, f.sz))) throw Err{L"не прочитать " + disp(ms[m].root + L"\\" + f.rel)};
+        if (!f.hashed && !(f.hashed = fcrc(fsp(ms[m], f), f.c, f.sz))) throw Err{L"не прочитать " + disp(ms[m].root + L"\\" + f.rel)};
         return f.c;
     };
     unordered_set<long long> dp;
@@ -857,7 +1113,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         for (int j = 0; j < (int)ms[m].f.size(); j++) {
             F& f = ms[m].f[j];
             if (!arc(f)) continue;
-            vector<uint64_t> hv = rdar(ms[m].root + L"\\" + f.rel);
+            vector<uint64_t> hv = rdar(fsp(ms[m], f));
             if (!ms[m].ex) { vh.push_back({m, j, move(hv)}); continue; }
             bn.insert(f.key);
             for (uint64_t x : hv) {
@@ -885,6 +1141,15 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
     };
     size_t na = 0;
     for (auto& [k, a] : apairs()) na += !core(ms[a.e], ms[a.v]) && !dp.count((long long)a.e << 32 | a.v);
+    if (mo2 && mq.ord) {
+        unordered_map<uint64_t, int> ow;
+        map<pair<int, int>, int> ap;
+        for (auto& [v, j, hv] : vh) {
+            if (!ms[v].on || ms[v].skip) continue;
+            for (uint64_t x : hv) if (auto [it, ok] = ow.try_emplace(x, v); !ok && it->second != v) ap[minmax(it->second, v)]++;
+        }
+        if (!ap.empty()) wn(L"в MO2 включён свой порядок архивов, лаунчер грузит их по имени: у " + to_wstring(ap.size()) + L" пар модов может смениться победитель, проверь карту конфликтов");
+    }
     int g = pol;
     if (apply && mg && !g && (nd || np || na)) {
         wprintf(L"\nмодов, которые есть и в сборке, и в вортексе: %d\nпар модов, которые спорят за одни файлы: %zu\nпар модов, у которых архивы спорят за ресурсы игры: %zu\nядро сборки не трогаю, там всегда остаётся версия сборки\n", nd, np, na);
@@ -892,7 +1157,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
     }
     if (mg && !g && !nd && !np && !na) g = 1;
     auto did = [&](const wchar_t* w, int e, int v) { return w + (L":" + lc(ms[e].cat + L"/" + ms[e].dir)) + L"|" + ms[v].lid; };
-    auto dno = [&](const D& d) { return d.lock || (d.same && !_wcsnicmp(ms[d.e].cat.c_str(), L"Vortex", 6) && lc(ms[d.e].orig) == ms[d.v].lid) ? 1 : 2; };
+    auto dno = [&](const D& d) { return d.lock || (d.same && !_wcsnicmp(ms[d.e].cat.c_str(), snm.c_str(), snm.size()) && lc(ms[d.e].orig) == ms[d.v].lid) ? 1 : 2; };
     auto pno = [&](int e, int v) { return core(ms[e], ms[v]) ? 1 : onemod(ms[e], ms[v]) ? 2 : 3; };
     int di = 0;
     for (auto& d : dups) {
@@ -996,16 +1261,31 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
 
     int von = 0, voff = 0, vskip = 0;
     for (int i = ne; i < (int)ms.size(); i++) ms[i].skip ? vskip++ : ms[i].on ? von++ : voff++;
+    if (mo2) {
+        static const unordered_set<wstring> tops = {L"archive", L"bin", L"engine", L"mods", L"r6", L"red4ext", L"tools"};
+        static const wregex rdoc(L".*\\.(txt|md|pdf|png|jpe?g|webp|gif|url|html?)");
+        size_t on = 0, off = 0;
+        for (int i = ne; i < (int)ms.size(); i++) {
+            (ms[i].on ? on : off)++;
+            if (ms[i].on && ms[i].pri != INT_MAX) for (auto& f : ms[i].f) if (!tops.count(f.key.substr(0, f.key.find(L'\\'))) && !regex_match(f.key, rdoc)) { wn(L"мод " + ms[i].name + L" лежит не от корня игры, в игре файл окажется не там: " + f.rel); break; }
+        }
+        wprintf(L"экземпляр MO2: %s, профиль %s\n", disp(mq.dir).c_str(), mq.prof.c_str());
+        wprintf(L"модов %zu: вкл %zu, выкл %zu, разделителей %zu\n", on + off, on, off, sps.size());
+        wprintf(L"overwrite: файлов %zu, отброшено логов и кэша %zu, скрытых .mohidden %zu, развёрнуто из root %zu\n", nov, njunk, nhid, nfold);
+        O("mo2").s("instance", disp(mq.dir)).s("profile", mq.prof).s("game", disp(game)).n("mods", on + off).n("on", on).n("off", off).n("separators", sps.size()).n("overwrite", nov).n("junk", njunk).n("hidden", nhid).n("rootfold", nfold).go();
+        if (mq.saves) wn(L"сейвы этого профиля лежат в " + disp(mq.pd) + L"\\saves, игра из лаунчера их не увидит, скопируй их в Saved Games сам");
+        if (mq.ui) wn(L"у профиля свой UserSettings.json, настройки игры из него лаунчер не подхватит: " + disp(mq.pd));
+    }
     wprintf(L"vortex: %s\n", disp(stg).c_str());
     wprintf(L"модов вортекса %d: вкл %d, выкл %d, пропущено %d\n", von + voff + vskip, von, voff, vskip);
     if (mg) wprintf(L"сборка экса: %s, модов %d, категория для переноса: %s\n", disp(out).c_str(), ne, cat.c_str());
     else wprintf(L"новая сборка: %s\n", disp(out).c_str());
     if (nprof > 1) wprintf(L"профилей %d, перенос попадёт только в активный: %s\n", nprof, aprof.c_str());
-    O("target").s("vortex", disp(stg)).s("build", disp(out)).b("merge", mg).n("exl", ne).s("category", cat).n("profiles", nprof).s("profile", aprof).go();
+    O("target").a("source", mo2 ? "mo2" : "vortex").s("vortex", disp(stg)).s("build", disp(out)).b("merge", mg).n("exl", ne).s("category", cat).n("profiles", nprof).s("profile", aprof).go();
     if (pmis) wn(L"активный профиль не совпадает с _activation_state.json, --apply откажется");
     wprintf(L"конфликтов внутри вортекса %zu, одинаковых файлов %d\n", nvv, same);
     if (stale) wn(to_wstring(stale) + L" записей манифеста не сходятся с папкой модов, сделай deploy в vortex");
-    for (auto& s : gone) wn(L"мод из манифеста не найден в папке модов: " + s);
+    for (auto& s : gone) wn((mo2 ? L"мод из modlist.txt не найден в папке модов: " : L"мод из манифеста не найден в папке модов: ") + s);
     for (auto& s : lnk) wn(L"ссылка пропущена: " + s);
     for (auto& s : col) wn(L"служебное имя exlauncher, не задеплоится: " + s);
 
@@ -1071,7 +1351,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         wstring lib, tp(MAX_PATH, 0);
         for (int m : o)
             if (ms[m].on && !ms[m].skip)
-                for (auto& f : ms[m].f) if (!f.drop && f.key == L"engine\\tools\\scc_lib.dll") lib = ms[m].root + L"\\" + f.rel;
+                for (auto& f : ms[m].f) if (!f.drop && f.key == L"engine\\tools\\scc_lib.dll") lib = fsp(ms[m], f);
         wstring gc = game + L"\\r6\\cache\\final.redscripts";
         if (lib.empty() || !exists(gc)) { wprintf(L"\n"), wn(L"скрипты не проверить: нет " + (lib.empty() ? wstring(L"engine\\tools\\scc_lib.dll (redscript)") : disp(gc))); break; }
         ph("scc", L"проверяю скрипты");
@@ -1100,7 +1380,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
                 F& f = ms[mj.first].f[mj.second];
                 wstring d = t + L"\\r6\\scripts\\" + (f.key[1] == L'6' ? f.rel.substr(11) : L"__plugins\\" + f.rel.substr(16)), dd = d.substr(0, d.rfind(L'\\'));
                 if (made.insert(dd).second) mkdirs(dd);
-                if (!CopyFileW((ms[mj.first].root + L"\\" + f.rel).c_str(), d.c_str(), FALSE)) throw Err{L"не скопировать " + disp(ms[mj.first].root + L"\\" + f.rel)};
+                if (!CopyFileW(fsp(ms[mj.first], f).c_str(), d.c_str(), FALSE)) throw Err{L"не скопировать " + disp(ms[mj.first].root + L"\\" + f.rel)};
                 who[k] = mj.first;
             }
             er.clear();
@@ -1189,7 +1469,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         for (auto& d : dups) lk(d.e, d.v);
         for (auto& a : acs) if (a.c == 2) lk(a.e, a.v);
         for (auto [e, v] : rep) lk(e, v);
-        if (w.empty() && !m.ex && !m.on && !m.skip) w = L"выключен в vortex";
+        if (w.empty() && !m.ex && !m.on && !m.skip) w = mo2 ? L"выключен в профиле MO2" : L"выключен в vortex";
         O("mod").r("i", n ? to_string(n) : "null").a("from", m.ex ? "exl" : "vortex").a("action", ac).b("on", m.on).s("name", m.name).s("dir", m.dir).s("cat", m.cat).s("ver", m.ver)
             .s("date", m.date).n("nid", m.nid).s("note", w).s("src", disp(m.root)).r("dst", m.skip ? "null" : js(disp(out + L"\\" + m.cat + L"\\" + m.dir))).go();
     };
@@ -1204,12 +1484,28 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         wprintf(L"  %s: %s -> %s%s\n", ms[es[i].from].f[es[i].fi].rel.c_str(), ms[es[i].from].dir.c_str(), ms[es[i].to].dir.c_str(), es[i].cut ? L"  [не копируется]" : L"");
         O("vconf").s("file", ms[es[i].from].f[es[i].fi].rel).s("loser", ms[es[i].from].dir).s("winner", ms[es[i].to].dir).b("cut", es[i].cut).go();
     }
+    if (mo2) {
+        unordered_map<wstring, int> fin;
+        for (int i : o) if (ms[i].on && !ms[i].skip) for (auto& f : ms[i].f) if (!f.drop) fin[f.key] = i;
+        size_t ns = 0, tb = 0, lost = 0, df = 0;
+        wstring ex;
+        for (auto& [k, w] : win) {
+            auto it = fin.find(k);
+            if (it == fin.end()) lost++;
+            else if (ms[it->second].ex) tb++;
+            else if (it->second == mi[w]) ns++;
+            else df++, ex = k;
+        }
+        wprintf(L"\nсверка с MO2: файлов как в MO2 %zu, берёт сборка %zu, не попадут в игру %zu, другой победитель %zu\n", ns, tb, lost, df);
+        O("verify").n("same", ns).n("build", tb).n("lost", lost).n("diff", df).go();
+        if (df) wn(L"победитель не совпал с MO2 у " + to_wstring(df) + L" файлов, например " + ex);
+    }
     if (!apply) return wprintf(L"\nэто план, --apply запишет\n"), sum(true), 0;
     if (!von && !voff) return wprintf(L"\nнечего переносить\n"), O("info").s("msg", L"нечего переносить").go(), sum(true), 0;
 
     if (mg && running(L"ExLauncher.exe")) throw Err{L"закрой ExLauncher, он перезапишет состояние сборки"};
     if (pmis) throw Err{L"активный профиль не совпадает с _activation_state.json, переключи профиль в лаунчере туда-обратно, закрой его и запусти снова"};
-    if (running(L"Vortex.exe")) wn(L"vortex открыт, не жми в нём deploy/purge пока идёт копирование");
+    if (running(mo2 ? L"ModOrganizer.exe" : L"Vortex.exe")) wn(mo2 ? L"MO2 открыт, не меняй в нём моды пока идёт копирование" : L"vortex открыт, не жми в нём deploy/purge пока идёт копирование");
     if (!mg && exists(parent + L"\\_vtx2exl_" + leaf)) throw Err{L"осталась прошлая попытка, удали руками: " + disp(parent + L"\\_vtx2exl_" + leaf)};
     wstring stage = mg ? out + L"\\_vtx2exl_tmp" : parent + L"\\_vtx2exl_" + leaf, croot = mg ? stage : stage + L"\\" + cat, jroot = mg ? out : stage;
     if (exists(stage)) throw Err{L"осталась прошлая попытка, удали руками: " + disp(stage)};
@@ -1225,7 +1521,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         made.insert(md);
         for (auto& f : ms[m].f) {
             if (f.drop) continue;
-            wstring src = ms[m].root + L"\\" + f.rel, dst = md + L"\\" + f.rel, dd = dst.substr(0, dst.rfind(L'\\'));
+            wstring src = fsp(ms[m], f), dst = md + L"\\" + f.rel, dd = dst.substr(0, dst.rfind(L'\\'));
             if (made.insert(dd).second) mkdirs(dd);
             if (CreateHardLinkW(dst.c_str(), src.c_str(), 0)) {
                 if (!samef(src, dst)) throw Err{L"ссылка не сошлась с оригиналом: " + disp(dst)};
@@ -1244,12 +1540,16 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         for (auto [e, v] : rep) if (v == m && ms[e].off) dn = ms[e].name;
         string meta = "{\"originalName\":" + js(ms[m].dir) + ",\"displayName\":" + js(dn) + ",\"origin\":\"user\",\"installedAt\":" + js(now);
         if (!ms[m].ver.empty()) meta += ",\"version\":" + js(ms[m].ver);
-        if (!ms[m].why.empty()) meta += ",\"description\":" + js(L"выключен при переносе: " + ms[m].why);
+        if (!ms[m].why.empty()) meta += ",\"description\":" + js(srn(L"выключен при переносе: " + ms[m].why, false));
+        else if (!ms[m].desc.empty()) meta += ",\"description\":" + js(ms[m].desc);
+        if (!ms[m].auth.empty()) meta += ",\"author\":" + js(ms[m].auth);
         if (ms[m].nid) {
             string id = to_string(ms[m].nid);
             meta += ",\"nexusModId\":\"" + id + "\",\"nexusGameDomain\":\"cyberpunk2077\",\"sourceUrl\":\"https://www.nexusmods.com/cyberpunk2077/mods/" + id + "\"";
             if (!ms[m].date.empty()) meta += ",\"nexusFileUploadedAt\":" + js(ms[m].date);
-        }
+            if (ms[m].fid) meta += ",\"nexusFileId\":\"" + to_string(ms[m].fid) + "\"";
+            if (!ms[m].fn.empty()) meta += ",\"nexusFileName\":" + js(ms[m].fn);
+        } else if (!ms[m].url.empty()) meta += ",\"sourceUrl\":" + js(ms[m].url);
         J ads;
         ads.t = J::ARR;
         for (int e = 0; e < ne; e++) {
@@ -1303,7 +1603,25 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         acts.v.push_back(move(a));
         if (!m.ex) mo += (mo.size() > 1 ? "," : "") + js(m.dir);
     }
-    spit(croot + L"\\_category.json", "{\"modOrder\":" + mo + "]}\n");
+    string sj;
+    if (mo2) {
+        unordered_set<int> ino(o.begin(), o.end());
+        size_t sx = 0;
+        mo = "[";
+        for (int i = ne; i < (int)ms.size(); i++) {
+            if (!ino.count(i)) continue;
+            for (; sx < sps.size() && sps[sx].first <= ms[i].pri; sx++) {
+                GUID gd;
+                CoCreateGuid(&gd);
+                wchar_t b[48];
+                swprintf_s(b, L"__sep__%08lx%04hx%04hx%02x%02x%02x%02x%02x%02x%02x%02x", gd.Data1, gd.Data2, gd.Data3, gd.Data4[0], gd.Data4[1], gd.Data4[2], gd.Data4[3], gd.Data4[4], gd.Data4[5], gd.Data4[6], gd.Data4[7]);
+                mo += (mo.size() > 1 ? "," : "") + js(b);
+                sj += (sj.empty() ? "{\"id\":" : ",{\"id\":") + js(b) + ",\"title\":" + js(sps[sx].second) + ",\"lineColor\":\"\",\"titleColor\":\"\"}";
+            }
+            mo += (mo.size() > 1 ? "," : "") + js(ms[i].dir);
+        }
+    }
+    spit(croot + L"\\_category.json", "{\"modOrder\":" + mo + "]" + (sj.empty() ? "" : ",\"separators\":[" + sj + "]") + "}\n");
     if (st.t != J::OBJ) st = pj("{\"buildName\":" + js(leaf) + "}");
     st.put("activations", acts);
     st.put("savedAt", pj(js(now)));
@@ -1321,8 +1639,8 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
                         x.put("order", pj(to_string(pa->v.size())));
                         pa->v.push_back(move(x));
                     }
-            npn = W(ap->s) + L" + Vortex";
-            for (int i = 2; ps->at(U(npn).c_str()); i++) npn = W(ap->s) + L" + Vortex " + to_wstring(i);
+            npn = W(ap->s) + L" + " + snm;
+            for (int i = 2; ps->at(U(npn).c_str()); i++) npn = W(ap->s) + L" + " + snm + L" " + to_wstring(i);
             J nj = pj("{\"name\":" + js(npn) + "}");
             nj.put("activations", acts);
             ps->put(U(npn).c_str(), move(nj));
@@ -1353,7 +1671,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         CoCreateGuid(&gd);
         wchar_t gb[40];
         swprintf_s(gb, L"%08lx-%04hx-%04hx-%02x%02x-%02x%02x%02x%02x%02x%02x", gd.Data1, gd.Data2, gd.Data3, gd.Data4[0], gd.Data4[1], gd.Data4[2], gd.Data4[3], gd.Data4[4], gd.Data4[5], gd.Data4[6], gd.Data4[7]);
-        spit(jroot + L"\\_build_info.json", "{\"buildId\":" + js(gb) + ",\"displayName\":" + js(title) + ",\"description\":" + js(L"из vortex " + now) + "}\n");
+        spit(jroot + L"\\_build_info.json", "{\"buildId\":" + js(gb) + ",\"displayName\":" + js(title) + ",\"description\":" + js(L"из " + snm + L" " + now) + "}\n");
     }
     spit(jroot + L"\\_activation_state.json", dumps(st), mg);
     spit(jroot + L"\\_profiles.json", dumps(pr), mg);
@@ -1534,6 +1852,16 @@ static int selftest() {
     for (auto& q : x) q.on = true, q.f.resize(2);
     vector<E> ex{{0, 1, -1}, {1, 2, 0}, {2, 0, 1}};
     ck(order(x, ex) == vector<int>{0, 1, 2} && x[2].f[1].drop && !x[0].f[0].drop && !x[1].f[0].drop, L"cycle exl untouched");
+    ck(qv("@ByteArray(C:\\\\Games\\\\Cyber)") == L"C:\\Games\\Cyber", L"qt bytearray");
+    ck(qv("@ByteArray(C:\\\\\\xd0\\x98)") == L"C:\\\u0418", L"qt5 bytes");
+    ck(qv(U(L"@ByteArray(\u00d0\u0098)")) == L"\u0418", L"qt6 bytes");
+    ck(qv("\"a, \\\"b\\\"\"") == L"a, \"b\"", L"qt quotes");
+    auto ml = mlist("# x\r\n+a b\r\n-c\r\n*d\r\ne\r\n+A B\r\n+Overwrite\n");
+    ck(ml.size() == 4 && ml[0].first == L"a b" && ml[0].second == L'+' && ml[1].second == L'-' && ml[2].second == L'*' && ml[3].first == L"e" && ml[3].second == L'+', L"modlist");
+    ck(mver(L"1.2.0.0") == L"1.2" && mver(L"v1.10.0") == L"1.10" && mver(L"d2023.5.17") == L"2023.5.17" && mver(L"f1.05") == L"1.05" && mver(L"1.0") == L"1.0", L"mo2 version");
+    vector<F> mf{{L"meta.ini", L"meta.ini"}, {L"a.archive.mohidden", L"a.archive.mohidden"}, {L"root\\bin\\x.dll", L"root\\bin\\x.dll"}, {L"bin\\x.dll", L"bin\\x.dll"}, {L"r6\\cache\\f", L"r6\\cache\\f"}, {L"archive\\pc\\mod\\modlist.txt", L"archive\\pc\\mod\\modlist.txt"}, {L"r6\\scripts\\a.reds", L"r6\\scripts\\a.reds"}};
+    mfilt(mf, true);
+    ck(mf.size() == 2 && mf[0].key == L"bin\\x.dll" && !mf[0].up && mf[1].key == L"r6\\scripts\\a.reds", L"mo2 filter");
     wprintf(L"selftest %s\n", bad ? L"FAIL" : L"ok");
     return bad;
 }
@@ -1551,13 +1879,15 @@ int wmain(int argc, wchar_t** argv) {
         vector<wstring> pos, xt;
         bool apply = false, chk = false, un = false, pg = false, st = false;
         int pol = 0;
-        wstring title, df;
+        wstring title, df, inst, pn;
         for (int i = 1; i < argc; i++)
             if (!wcscmp(argv[i], L"--apply")) apply = true;
             else if (!wcscmp(argv[i], L"--keep")) pol = 1;
             else if (!wcscmp(argv[i], L"--take")) pol = 2;
             else if (!wcscmp(argv[i], L"--vortex")) pol = 4;
             else if (!wcscmp(argv[i], L"--extra") && i + 1 < argc) xt.push_back(argv[++i]);
+            else if (!wcscmp(argv[i], L"--mo2") && i + 1 < argc) inst = argv[++i];
+            else if (!wcscmp(argv[i], L"--profile") && i + 1 < argc) pn = argv[++i];
             else if (!wcscmp(argv[i], L"--check")) chk = true;
             else if (!wcscmp(argv[i], L"--undo")) un = true;
             else if (!wcscmp(argv[i], L"--purge")) pg = true;
@@ -1566,7 +1896,8 @@ int wmain(int argc, wchar_t** argv) {
             else if (!wcscmp(argv[i], L"--decisions") && i + 1 < argc) df = argv[++i];
             else if (!wcscmp(argv[i], L"--name") && i + 1 < argc) title = argv[++i];
             else pos.push_back(argv[i]);
-        O("start").n("v", 1).a("mode", st ? "selftest" : un ? "undo" : pg ? "purge" : "migrate").b("check", chk || apply).b("apply", apply)
+        mo2 = !inst.empty();
+        O("start").n("v", 1).a("source", mo2 ? "mo2" : "vortex").a("mode", st ? "selftest" : un ? "undo" : pg ? "purge" : "migrate").b("check", chk || apply).b("apply", apply)
             .r("policy", pol == 1 ? "\"keep\"" : pol == 2 ? "\"take\"" : pol == 4 ? "\"vortex\"" : "null").b("decisions", !df.empty()).go();
         if (!df.empty()) {
             if (!pol) throw Err{L"--decisions только вместе с --keep / --take / --vortex"};
@@ -1574,11 +1905,12 @@ int wmain(int argc, wchar_t** argv) {
             if (dec.t != J::OBJ) throw Err{L"--decisions: нужен объект {\"id конфликта\": \"вариант\"}"};
             du.assign(dec.k.size(), 0);
         }
+        if (mo2 && pg) throw Err{L"--purge не для MO2: MO2 не кладёт файлы в папку игры"};
         if (st && argc == 2 + jm) rc = selftest();
         else if (un && pos.size() == 1) rc = undo(pos[0], apply);
         else if (pg && pos.size() == 1) rc = purge(pos[0], apply);
-        else if (st || un || pg || pos.size() != 2) fwprintf(stderr, L"vtx2exl <папка игры> <папка сборки> [--check] [--apply] [--keep | --take | --vortex] [--extra папка]... [--name имя]\nvtx2exl --undo <папка сборки> [--apply]\nvtx2exl --purge <папка игры> [--apply]\nvtx2exl --selftest\n"), O("error").s("msg", L"неверные аргументы").go();
-        else rc = run(pos[0], pos[1], apply, pol, title, chk || apply, xt);
+        else if (st || un || pg || pos.size() != (mo2 && pos.size() == 1 ? 1u : 2u)) fwprintf(stderr, L"vtx2exl --mo2 <экземпляр> [--profile имя] [<папка игры>] <папка сборки> [ключи как ниже]\n"), fwprintf(stderr, L"vtx2exl <папка игры> <папка сборки> [--check] [--apply] [--keep | --take | --vortex] [--extra папка]... [--name имя]\nvtx2exl --undo <папка сборки> [--apply]\nvtx2exl --purge <папка игры> [--apply]\nvtx2exl --selftest\n"), O("error").s("msg", L"неверные аргументы").go();
+        else rc = run(pos.size() == 2 ? pos[0] : L"", pos.back(), apply, pol, title, chk || apply, xt, inst, pn);
     } catch (Err& e) {
         fwprintf(stderr, L"ошибка: %s\n", e.m.c_str());
         O("error").s("msg", e.m).go();
