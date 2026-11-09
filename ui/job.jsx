@@ -24,6 +24,8 @@ export const feed = (j, e) => {
     case 'progress': { const p = j.ph.find(p => p.id == e.phase); if (p) p.d = e.done, p.t = e.total, p.it = e.item || ''; break }
     case 'target': j.tg = e; break
     case 'mo2': j.mo2 = e; break
+    case 'verify': add(j, e.diff || e.lost ? 'warn' : 'ok', `сверка: как в источнике ${e.same}, берёт сборка ${e.build}, не попадут в игру ${e.lost}, другой победитель ${e.diff}`); break
+    case 'fomod': if (e.kept || e.frozen.length) add(j, e.frozen.length ? 'warn' : 'ok', `fomod: выборы перенесены ${e.kept}, обновления заморожены ${e.frozen.length}${e.frozen.length ? ': ' + e.frozen.join(', ') : ''}`); break
     case 'conflict': j.cf.push(e); break
     case 'mod': j.mods.push(e); break
     case 'vconf': j.vc++; break
