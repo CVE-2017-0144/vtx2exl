@@ -47,6 +47,26 @@
 
 Версия из имени папки может быть неверной: Vortex обновляет файлы мода "на месте", имя остаётся старым. Поэтому, если в моде ровно один `red4ext\plugins\<плагин>\<имя>.dll` и версия в его ресурсе новее, берётся она (`dllver`). Если регулярки перестанут совпадать, id и версия окажутся пустыми, а дубли будут искаться только по имени папки.
 
+### База состояния Vortex
+
+Живая база Vortex лежит в LevelDB, её не читаем. Берём самый свежий по времени записи файл из `%APPDATA%\Vortex\temp\state_backups_full\*.json` (`hourly.json`, `startup.json`), поэтому данные могут немного отставать. Нет файла или он битый: предупреждение, версия и Nexus id берутся из имени папки через `nm`.
+
+Функция `vmeta`, ветка `persistent.mods.cyberpunk2077.<папка мода>`, поле `attributes`:
+
+| ключ | куда в `_mod_meta.json` |
+|---|---|
+| `modId`, при `source` = `nexus` и `downloadGame` = `cyberpunk2077` | `nexusModId`, иначе `homepage` идёт в `sourceUrl` |
+| `version`, без точек в конце | `version`, `dllver` может поднять её для плагинов RED4ext |
+| `fileId`, `fileName` | `nexusFileId`, `nexusFileName` |
+| `uploadedTimestamp` | `nexusFileUploadedAt` |
+| `author`, если пусто `uploader` | `author` |
+| `shortDescription` | `description` |
+| `customFileName` | `displayName` |
+| `pictureUrl`, `modName` | `pictureUrl`, `nexusName` |
+| `installerChoices` | `fomod`, см. раздел про FOMOD в `_mod_meta.json` |
+
+Архив установки: `persistent.downloads.files.<archiveId>.localPath` внутри `<settings.downloads.path>\cyberpunk2077`, `{USERDATA}` заменяется на `%APPDATA%\Vortex`.
+
 ### Следы Vortex в игре (для очистки)
 
 * Файлы в папке игры, которые являются жёсткими ссылками на файлы staging.
@@ -241,6 +261,14 @@ ExMods\                         корень сборок (рядом с игр�
 Что лаунчер делает с этим (по его коду): проверка обновлений требует непустых `nexusModId` и `nexusGameDomain` и сравнивает только `version` (пустая версия означает вечное "есть обновление"). Поиск дубликатов при установке сравнивает `nexusModId`, а если `nexusFileId` и `nexusFileName` оба пусты, считает совпавшим любой файл этой страницы Nexus, поэтому их стоит заполнять, когда они известны. Остальные ключи лаунчера (`ignoreUpdatesUntil`, `manualEdits`, `fomod` и т. д.) ядро не пишет, читатель в лаунчере терпим к их отсутствию. Мод без `_mod_meta.json` лаунчер показывает по имени папки.
 
 Читает ядро у модов сборки: `originalName`, `nexusModId`, `displayName`, `version`, `description`, `nexusFileUploadedAt` (иначе `installedAt`), `addons[]` с полями `type`, `displayName`, `replacedFiles`, `addedFiles`.
+
+### FOMOD в `_mod_meta.json`
+
+Поле `fomod`: `{moduleName, installedAt, choices: [{stepName, groupName, pluginId, pluginName}]}`, `pluginId` у нас это `idx` из Vortex. Лаунчер повторяет выбор при обновлении только по `pluginName`, причём по всем группам сразу: одинаковое имя в другой группе ломает выбор, и группа сбрасывается на вариант по умолчанию. Без поля `fomod` обновление ставит архив как есть.
+
+Поэтому `fsafe` читает `fomod/ModuleConfig.xml` из исходного архива (`fcfg`, через системный `tar.exe`) и проверяет, что в каждой группе отметятся ровно те опции, что были выбраны. Не прошло или архива нет: выбор всё равно пишется, а в `ignoreUpdatesUntil` ставится 2036 год, чтобы "Обновить всё" не трогало мод.
+
+MO2 выборы установщика нигде не хранит (в исходниках `installer_fomod` их записи нет), поэтому переносить нечего. Мод с Nexus id считается FOMOD-модом, если в его папке есть `fomod\` или в архиве из `downloads` есть `fomod/ModuleConfig.xml`. Такие моды замораживаются.
 
 ### <мод>\_mod_snapshot.json
 

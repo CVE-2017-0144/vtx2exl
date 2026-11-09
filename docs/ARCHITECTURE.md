@@ -173,6 +173,9 @@ VTX2EXL-UI.exe (Bun, один процесс)
 | `mlist` | разбор modlist.txt: список (имя, префикс), без повторов, без Overwrite |
 | `mver` | версия MO2 в нормальный вид |
 | `mmeta` | чтение `meta.ini` мода MO2 |
+| `vmeta` | метаданные и выборы FOMOD мода Vortex из бэкапа его базы |
+| `tarout`, `fcfg` | системный `tar.exe`: найти и прочитать `fomod/ModuleConfig.xml` в архиве |
+| `fsafe`, `xn` | проверка, что лаунчер повторит выбор FOMOD; нормализация имён из XML |
 | `mfilt` | фильтр файлов мода MO2 (счётчики `nhid`, `nfold`, `njunk`) |
 | `miread` | чтение экземпляра MO2 в `MI` |
 | `run` | сам перенос |
