@@ -38,6 +38,7 @@ jobs:
           ./vtx2exl.exe --selftest
           ./VTX2EXL-UI.exe --smoke
           node analyzer/test.mjs
+          node tests/mo2.mjs
           (cd ui && bun test)
 
       - name: sums
