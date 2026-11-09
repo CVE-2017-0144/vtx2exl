@@ -392,7 +392,7 @@ static const unordered_set<wstring> svc = {
     L"_optimize_backup", L"_variants"};
 
 struct F { wstring rel, key; uint64_t sz = 0; uint32_t c = 0; bool hashed = false, drop = false, up = false; };
-struct M { wstring root, cat, dir, lid, orig, name, ver, desc, date, why; long long nid = 0; bool on = false, ex = false, skip = false, off = false; int ei = -1; vector<F> f; vector<wstring> add; J aj; int pri = 0; long long fid = 0; wstring fn, url, auth; };
+struct M { wstring root, cat, dir, lid, orig, name, ver, desc, date, why; long long nid = 0; bool on = false, ex = false, skip = false, off = false; int ei = -1; vector<F> f; vector<wstring> add; J aj; int pri = 0; long long fid = 0; wstring fn, url, auth, shown, pic, nex; string fj; bool frz = false; };
 static wstring fsp(const M& m, const F& f) { return m.root + (f.up ? L"\\root\\" : L"\\") + f.rel; }
 
 static wstring dllver(const wstring& p) {
@@ -427,6 +427,12 @@ static void walk(const wstring& root, const wstring& rel, vector<F>& out, vector
     FindClose(h);
 }
 
+static wstring ymd(__time64_t ts) {
+    tm t;
+    wchar_t b[16];
+    return !_gmtime64_s(&t, &ts) && wcsftime(b, 16, L"%Y-%m-%d", &t) ? b : L"";
+}
+
 static void nm(M& m) {
     static const wregex rx(LR"(^(.+?)-(\d+)-(.*?)-*-(\d{9,11})(\.\d+)?$)"), rv(LR"(^(.*?)[ _-]*v?(\d+(?:\.\d+)+))"), rl(LR"(^(.+?) v?(\d+(?:\.\d+)+) (\d{2,6}) \S+ (\d{4}-\d{2}-\d{2})T)");
     wsmatch g;
@@ -438,10 +444,7 @@ static void nm(M& m) {
     }
     m.name = g[1], m.nid = _wtoi64(g[2].str().c_str()), m.ver = g[3];
     replace(m.ver.begin(), m.ver.end(), L'-', L'.');
-    __time64_t ts = _wtoi64(g[4].str().c_str());
-    tm t;
-    wchar_t b[16];
-    if (!_gmtime64_s(&t, &ts) && wcsftime(b, 16, L"%Y-%m-%d", &t)) m.date = b;
+    m.date = ymd(_wtoi64(g[4].str().c_str()));
 }
 
 static int vcmp(const wstring& a, const wstring& b) {
@@ -743,6 +746,145 @@ static void mmeta(M& m) {
     if (!m.nid) m.url = g("general/url");
 }
 
+static string tarout(const wstring& dir, const wstring& args) {
+    SECURITY_ATTRIBUTES sa{sizeof sa, 0, TRUE};
+    HANDLE r, w, nu = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, 0);
+    if (!CreatePipe(&r, &w, &sa, 0)) return "";
+    SetHandleInformation(r, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{};
+    si.cb = sizeof si, si.dwFlags = STARTF_USESTDHANDLES, si.hStdInput = nu, si.hStdOutput = w, si.hStdError = nu;
+    PROCESS_INFORMATION pi{};
+    wchar_t sys[MAX_PATH];
+    GetSystemDirectoryW(sys, MAX_PATH);
+    wstring cmd = L"\"" + wstring(sys) + L"\\tar.exe\" " + args;
+    string o;
+    BOOL ok = CreateProcessW(0, cmd.data(), 0, 0, TRUE, CREATE_NO_WINDOW, 0, disp(dir).c_str(), &si, &pi);
+    CloseHandle(w), CloseHandle(nu);
+    char b[65536];
+    DWORD n, rc = 1;
+    while (ok && ReadFile(r, b, sizeof b, &n, 0) && n && o.size() < 1u << 26) o.append(b, n);
+    CloseHandle(r);
+    if (!ok) return "";
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &rc);
+    CloseHandle(pi.hProcess), CloseHandle(pi.hThread);
+    return rc ? "" : o;
+}
+
+static bool fcfg(const wstring& a, wstring* x) {
+    if (!exists(a)) return false;
+    size_t c = a.rfind(L'\\');
+    wstring d = a.substr(0, c), n = a.substr(c + 1);
+    string l = tarout(d, L"-tf \"" + n + L"\""), e;
+    for (size_t p = 0, q; p < l.size() && e.empty(); p = q + 1) {
+        q = l.find('\n', p);
+        if (q == string::npos) q = l.size();
+        string t = l.substr(p, q - p);
+        if (!t.empty() && t.back() == '\r') t.pop_back();
+        string u = t;
+        for (auto& ch : u) ch = ch == '\\' ? '/' : (char)tolower((uint8_t)ch);
+        if (u == "fomod/moduleconfig.xml" || (u.size() > 23 && !u.compare(u.size() - 23, 23, "/fomod/moduleconfig.xml"))) e = t;
+    }
+    if (e.empty()) return false;
+    if (x) {
+        string b = tarout(d, L"-xOf \"" + n + L"\" \"" + W(e) + L"\"");
+        if (b.size() >= 2 && (uint8_t)b[0] == 0xFF && (uint8_t)b[1] == 0xFE) x->assign((const wchar_t*)b.data() + 1, (b.size() - 2) / 2);
+        else *x = W(b.rfind("\xEF\xBB\xBF", 0) ? b : b.substr(3));
+    }
+    return true;
+}
+
+static wstring xn(wstring s) {
+    static const pair<const wchar_t*, const wchar_t*> e[] = {{L"&lt;", L"<"}, {L"&gt;", L">"}, {L"&quot;", L"\""}, {L"&apos;", L"'"}, {L"&amp;", L"&"}};
+    for (auto& [a, b] : e) for (size_t p = 0; (p = s.find(a, p)) != wstring::npos; p++) s.replace(p, wcslen(a), b);
+    size_t a = s.find_first_not_of(L" \t\r\n"), b = s.find_last_not_of(L" \t\r\n");
+    return a == wstring::npos ? L"" : lc(s.substr(a, b - a + 1));
+}
+
+// launcher replays by plugin name across all groups, a name shared with another group breaks the choice
+static bool fsafe(const wstring& x, J& ic, wstring& mn) {
+    struct G { wstring k; size_t at; vector<wstring> pl; };
+    vector<G> gs;
+    wstring st;
+    if (size_t a = x.find(L"<moduleName"); a != wstring::npos && (a = x.find(L'>', a)) != wstring::npos) mn = x.substr(a + 1, x.find(L'<', a) - a - 1);
+    for (size_t p = 0; (p = x.find(L'<', p)) != wstring::npos; p++) {
+        int t = 0;
+        for (auto [w, n] : {pair<const wchar_t*, int>{L"installStep", 1}, {L"group", 2}, {L"plugin", 3}})
+            if (size_t l = wcslen(w); !x.compare(p + 1, l, w) && p + 1 + l < x.size() && iswspace(x[p + 1 + l])) t = n;
+        size_t e = x.find(L'>', p), a = x.find(L"name=", p);
+        if (!t || e == wstring::npos || a == wstring::npos || a > e || a + 5 >= x.size()) continue;
+        wchar_t q = x[a + 5];
+        wstring v = xn(x.substr(a + 6, x.find(q, a + 6) - a - 6));
+        if (t == 1) st = v;
+        else if (t == 2) gs.push_back({st + L"|" + v, p, {}});
+        else if (!gs.empty()) gs.back().pl.push_back(v);
+    }
+    unordered_map<wstring, unordered_set<wstring>> ex;
+    unordered_set<wstring> S, seen;
+    J* op = ic.at("options");
+    if (!op || op->t != J::ARR) return false;
+    for (auto& o : op->v) {
+        J *sn = o.at("name"), *gv = o.at("groups");
+        if (!sn || !gv) return false;
+        for (auto& g : gv->v) {
+            J *gn = g.at("name"), *cv = g.at("choices");
+            if (!gn || !cv) return false;
+            auto& e = ex[xn(W(sn->s)) + L"|" + xn(W(gn->s))];
+            for (auto& c : cv->v) if (J* n = c.at("name")) e.insert(xn(W(n->s))), S.insert(xn(W(n->s)));
+        }
+    }
+    if (S.empty()) return false;
+    for (size_t i = 0; i < gs.size(); i++) {
+        unordered_set<wstring> mt;
+        for (auto& n : gs[i].pl) if (S.count(n)) mt.insert(n);
+        auto it = ex.find(gs[i].k);
+        if (it != ex.end()) seen.insert(gs[i].k);
+        if (mt != (it == ex.end() ? unordered_set<wstring>() : it->second)) return false;
+        if (mt.empty() && it != ex.end()) {
+            wstring b = x.substr(gs[i].at, (i + 1 < gs.size() ? gs[i + 1].at : x.size()) - gs[i].at);
+            if (b.find(L"\"Recommended\"") != wstring::npos || b.find(L"\"Required\"") != wstring::npos) return false;
+        }
+    }
+    return seen.size() == ex.size();
+}
+
+static void vmeta(M& m, J* mods, J* dls, const wstring& dl, size_t& miss) {
+    J *e = mods->at(U(m.dir).c_str()), *a = e ? e->at("attributes") : 0;
+    if (!a) { miss++; return; }
+    auto g = [&](const char* k) { J* x = a->at(k); return x ? W(x->s) : wstring(); };
+    long long id = _wtoi64(g("modId").c_str()), ts = _wtoi64(g("uploadedTimestamp").c_str());
+    m.nid = lc(g("source")) == L"nexus" && lc(g("downloadGame")) == L"cyberpunk2077" && id > 0 ? id : 0;
+    wstring v = g("version");
+    while (!v.empty() && v.back() == L'.') v.pop_back();
+    if (!v.empty()) m.ver = v;
+    if (m.nid) {
+        m.fid = _wtoi64(g("fileId").c_str()), m.fn = g("fileName");
+        if (ts > 0) m.date = ymd(ts);
+    } else m.url = g("homepage");
+    m.auth = g("author").empty() ? g("uploader") : g("author");
+    m.desc = g("shortDescription"), m.shown = g("customFileName"), m.pic = g("pictureUrl"), m.nex = g("modName");
+    J* ic = a->at("installerChoices");
+    J* op = ic ? ic->at("options") : 0;
+    if (!op || op->t != J::ARR) return;
+    string cj;
+    for (auto& o : op->v) {
+        J *sn = o.at("name"), *gv = o.at("groups");
+        if (sn && gv) for (auto& gr : gv->v) {
+            J *gn = gr.at("name"), *cv = gr.at("choices");
+            if (gn && cv) for (auto& c : cv->v) {
+                J *n = c.at("name"), *ix = c.at("idx");
+                if (n) cj += (cj.empty() ? "{\"stepName\":" : ",{\"stepName\":") + js8(sn->s) + ",\"groupName\":" + js8(gn->s) + ",\"pluginId\":" + js8(ix ? ix->s : "") + ",\"pluginName\":" + js8(n->s) + "}";
+            }
+        }
+    }
+    if (cj.empty()) return;
+    wstring x, mn;
+    J *ar = e->at("archiveId"), *f = ar && dls ? dls->at(ar->s.c_str()) : 0, *lo = f ? f->at("localPath") : 0;
+    bool ok = lo && fcfg(dl + L"\\cyberpunk2077\\" + W(lo->s), &x) && fsafe(x, *ic, mn);
+    m.fj = "{\"moduleName\":" + js(mn.empty() ? m.name : mn) + ",\"installedAt\":" + js(g("installTime")) + ",\"choices\":[" + cj + "]}";
+    m.frz = !ok;
+}
+
 static size_t nhid, nfold, njunk;
 static void mfilt(vector<F>& v, bool ov) {
     static const wchar_t* const jk[] = {L"r6\\cache\\", L"r6\\logs\\", L"red4ext\\logs\\", L"logs\\"};
@@ -765,7 +907,7 @@ static void mfilt(vector<F>& v, bool ov) {
     v.resize(j);
 }
 
-struct MI { wstring dir, mods, over, pd, prof, game; vector<pair<wstring, wchar_t>> l; bool ord = false, saves = false, ui = false; };
+struct MI { wstring dir, mods, over, dl, pd, prof, game; vector<pair<wstring, wchar_t>> l; bool ord = false, saves = false, ui = false; };
 static MI miread(wstring d, const wstring& pn) {
     wchar_t la[MAX_PATH] = L"";
     GetEnvironmentVariableW(L"LOCALAPPDATA", la, MAX_PATH);
@@ -786,7 +928,7 @@ static MI miread(wstring d, const wstring& pn) {
         return lp(v.size() > 1 && (v[1] == L':' || v[0] == L'\\') ? v : base + L"\\" + v);
     };
     MI r;
-    r.dir = d, r.mods = pth("settings/mod_directory", L"mods"), r.over = pth("settings/overwrite_directory", L"overwrite"), r.game = g("general/gamepath");
+    r.dir = d, r.mods = pth("settings/mod_directory", L"mods"), r.over = pth("settings/overwrite_directory", L"overwrite"), r.dl = pth("settings/download_directory", L"downloads"), r.game = g("general/gamepath");
     r.prof = pn.empty() ? g("general/selected_profile") : pn;
     if (r.prof.empty()) r.prof = L"Default";
     wstring ps = pth("settings/profiles_directory", L"profiles");
@@ -833,6 +975,10 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
     unordered_map<wstring, int> pri;
     vector<pair<int, wstring>> sps;
     static const wregex rsep(L".*_separator"), rbak(L".*backup[0-9]*");
+    J vst;
+    J *vmods = 0, *vdls = 0;
+    wstring vdl;
+    size_t vmiss = 0;
     if (mo2) {
         stg = mq.mods;
         int n = (int)mq.l.size();
@@ -856,6 +1002,27 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
             win[lc(r)] = s;
             dep.insert(s);
         }
+        wchar_t ad[MAX_PATH] = L"";
+        GetEnvironmentVariableW(L"APPDATA", ad, MAX_PATH);
+        wstring vh = wstring(ad) + L"\\Vortex", bd = vh + L"\\temp\\state_backups_full", bs;
+        WIN32_FIND_DATAW fd;
+        FILETIME bt{};
+        HANDLE h = FindFirstFileExW((bd + L"\\*.json").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, 0, 0);
+        if (h != INVALID_HANDLE_VALUE) {
+            do if (CompareFileTime(&fd.ftLastWriteTime, &bt) > 0) bt = fd.ftLastWriteTime, bs = fd.cFileName;
+            while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        try { if (!bs.empty()) vst = pj(slurp(bd + L"\\" + bs)); } catch (Err&) {}
+        J* pe = vst.t == J::OBJ ? vst.at("persistent") : 0;
+        J* mo = pe ? pe->at("mods") : 0;
+        vmods = mo ? mo->at("cyberpunk2077") : 0;
+        J* dn = pe ? pe->at("downloads") : 0;
+        vdls = dn ? dn->at("files") : 0;
+        J *se = vst.t == J::OBJ ? vst.at("settings") : 0, *ds = se ? se->at("downloads") : 0, *dp = ds ? ds->at("path") : 0;
+        vdl = dp ? W(dp->s) : L"{USERDATA}\\downloads";
+        if (size_t p = vdl.find(L"{USERDATA}"); p != wstring::npos) vdl.replace(p, 10, vh);
+        vdl = lp(vdl);
     }
 
     vector<M> ms;
@@ -943,10 +1110,12 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
                 auto it = pri.find(m.lid);
                 m.pri = it == pri.end() ? 0 : it->second;
                 mmeta(m);
+                if (m.nid) m.frz = any_of(m.f.begin(), m.f.end(), [](const F& f) { return !f.key.rfind(L"fomod\\", 0); }) || (!m.fn.empty() && fcfg(mq.dl + L"\\" + m.fn, 0));
                 mfilt(m.f, false);
                 if (m.f.empty()) dep.erase(m.lid);
                 if (m.dir[0] == L'_') m.dir = L"m" + m.dir;
             } else if (mo2) m.pri = INT_MAX / 2;
+            else if (!ri && vmods) vmeta(m, vmods, vdls, vdl, vmiss);
             wstring dv;
             int nk = 0;
             for (auto& f : m.f)
@@ -1261,6 +1430,19 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
 
     int von = 0, voff = 0, vskip = 0;
     for (int i = ne; i < (int)ms.size(); i++) ms[i].skip ? vskip++ : ms[i].on ? von++ : voff++;
+    if (!mo2 && !vmods) wn(L"нет бэкапа базы vortex (temp\\state_backups_full), версии и nexus id взяты из имён папок");
+    if (vmiss) wn(L"в базе vortex нет модов: " + to_wstring(vmiss) + L", их данные взяты из имён папок");
+    {
+        size_t fk = 0;
+        vector<wstring> fz;
+        for (int i = ne; i < (int)ms.size(); i++) {
+            fk += !ms[i].fj.empty();
+            if (ms[i].frz) fz.push_back(ms[i].name);
+        }
+        if (fk || !fz.empty()) wprintf(L"fomod: выборы перенесены %zu, обновления заморожены %zu\n", fk, fz.size());
+        for (auto& n : fz) wprintf(L"  заморожен, лаунчер не повторит выбор при обновлении: %s\n", n.c_str());
+        O("fomod").n("kept", fk).r("frozen", jarr(fz)).go();
+    }
     if (mo2) {
         static const unordered_set<wstring> tops = {L"archive", L"bin", L"engine", L"mods", L"r6", L"red4ext", L"tools"};
         static const wregex rdoc(L".*\\.(txt|md|pdf|png|jpe?g|webp|gif|url|html?)");
@@ -1484,21 +1666,23 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         wprintf(L"  %s: %s -> %s%s\n", ms[es[i].from].f[es[i].fi].rel.c_str(), ms[es[i].from].dir.c_str(), ms[es[i].to].dir.c_str(), es[i].cut ? L"  [не копируется]" : L"");
         O("vconf").s("file", ms[es[i].from].f[es[i].fi].rel).s("loser", ms[es[i].from].dir).s("winner", ms[es[i].to].dir).b("cut", es[i].cut).go();
     }
-    if (mo2) {
+    {
         unordered_map<wstring, int> fin;
         for (int i : o) if (ms[i].on && !ms[i].skip) for (auto& f : ms[i].f) if (!f.drop) fin[f.key] = i;
         size_t ns = 0, tb = 0, lost = 0, df = 0;
         wstring ex;
         for (auto& [k, w] : win) {
+            auto wm = mi.find(w);
+            if (wm == mi.end() || !own.count(k)) continue;
             auto it = fin.find(k);
             if (it == fin.end()) lost++;
             else if (ms[it->second].ex) tb++;
-            else if (it->second == mi[w]) ns++;
+            else if (it->second == wm->second) ns++;
             else df++, ex = k;
         }
-        wprintf(L"\nсверка с MO2: файлов как в MO2 %zu, берёт сборка %zu, не попадут в игру %zu, другой победитель %zu\n", ns, tb, lost, df);
+        wprintf(L"\nсверка с vortex: файлов как в vortex %zu, берёт сборка %zu, не попадут в игру %zu, другой победитель %zu\n", ns, tb, lost, df);
         O("verify").n("same", ns).n("build", tb).n("lost", lost).n("diff", df).go();
-        if (df) wn(L"победитель не совпал с MO2 у " + to_wstring(df) + L" файлов, например " + ex);
+        if (df) wn(L"победитель не совпал с вортексом у " + to_wstring(df) + L" файлов, например " + ex);
     }
     if (!apply) return wprintf(L"\nэто план, --apply запишет\n"), sum(true), 0;
     if (!von && !voff) return wprintf(L"\nнечего переносить\n"), O("info").s("msg", L"нечего переносить").go(), sum(true), 0;
@@ -1535,7 +1719,7 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
             if (++done % 1000 == 0) wprintf(L"%zu/%zu\n", done, tot);
             prog("copy", done, tot, ms[m].dir);
         }
-        wstring dn = ms[m].name;
+        wstring dn = ms[m].shown.empty() ? ms[m].name : ms[m].shown;
         for (auto& d : dups) if (d.v == m && ms[d.e].off) dn = ms[d.e].name;
         for (auto [e, v] : rep) if (v == m && ms[e].off) dn = ms[e].name;
         string meta = "{\"originalName\":" + js(ms[m].dir) + ",\"displayName\":" + js(dn) + ",\"origin\":\"user\",\"installedAt\":" + js(now);
@@ -1543,6 +1727,10 @@ static int run(const wstring& ga, const wstring& oa, bool apply, int pol, wstrin
         if (!ms[m].why.empty()) meta += ",\"description\":" + js(srn(L"выключен при переносе: " + ms[m].why, false));
         else if (!ms[m].desc.empty()) meta += ",\"description\":" + js(ms[m].desc);
         if (!ms[m].auth.empty()) meta += ",\"author\":" + js(ms[m].auth);
+        if (!ms[m].pic.empty()) meta += ",\"pictureUrl\":" + js(ms[m].pic);
+        if (!ms[m].nex.empty()) meta += ",\"nexusName\":" + js(ms[m].nex);
+        if (!ms[m].fj.empty()) meta += ",\"fomod\":" + ms[m].fj;
+        if (ms[m].frz) meta += ",\"ignoreUpdatesUntil\":\"2036-01-01T00:00:00.0000000Z\"";
         if (ms[m].nid) {
             string id = to_string(ms[m].nid);
             meta += ",\"nexusModId\":\"" + id + "\",\"nexusGameDomain\":\"cyberpunk2077\",\"sourceUrl\":\"https://www.nexusmods.com/cyberpunk2077/mods/" + id + "\"";
@@ -1862,6 +2050,11 @@ static int selftest() {
     vector<F> mf{{L"meta.ini", L"meta.ini"}, {L"a.archive.mohidden", L"a.archive.mohidden"}, {L"root\\bin\\x.dll", L"root\\bin\\x.dll"}, {L"bin\\x.dll", L"bin\\x.dll"}, {L"r6\\cache\\f", L"r6\\cache\\f"}, {L"archive\\pc\\mod\\modlist.txt", L"archive\\pc\\mod\\modlist.txt"}, {L"r6\\scripts\\a.reds", L"r6\\scripts\\a.reds"}};
     mfilt(mf, true);
     ck(mf.size() == 2 && mf[0].key == L"bin\\x.dll" && !mf[0].up && mf[1].key == L"r6\\scripts\\a.reds", L"mo2 filter");
+    wstring fx = L"<moduleName>Mod</moduleName><installStep name=\"S\"><group name=\"A\" type=\"SelectExactlyOne\"><plugin name=\"X &amp; 1\"></plugin><plugin name=\"Y\"></plugin></group><group name=\"B\" type=\"SelectExactlyOne\"><plugin name=\"Y\"></plugin><plugin name=\"Z\"></plugin></group></installStep>", fm;
+    J ok1 = pj(R"({"options":[{"name":"S","groups":[{"name":"A","choices":[{"name":"X & 1","idx":0}]},{"name":"B","choices":[{"name":"Z","idx":1}]}]}]})"), bad1 = pj(R"({"options":[{"name":"S","groups":[{"name":"A","choices":[{"name":"X & 1","idx":0}]},{"name":"B","choices":[{"name":"Y","idx":0}]}]}]})"), gone1 = pj(R"({"options":[{"name":"S2","groups":[{"name":"A","choices":[{"name":"X & 1","idx":0}]}]}]})");
+    ck(fsafe(fx, ok1, fm) && fm == L"Mod", L"fomod safe");
+    ck(!fsafe(fx, bad1, fm), L"fomod shared name");
+    ck(!fsafe(fx, gone1, fm), L"fomod renamed step");
     wprintf(L"selftest %s\n", bad ? L"FAIL" : L"ok");
     return bad;
 }

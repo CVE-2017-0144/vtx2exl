@@ -10,7 +10,8 @@ conflict {t,id,kind:"dup|files|archive",name,a:side,b:side,default:opt|null,choi
   archive +{shared:n,a_archive,b_archive}  options keep take both
   opt: keep = build wins, take = vortex wins, each = decide per file, both = keep both mods on. default = what the policy picks, choice = what is applied. lock = only one option. null = no policy given, nothing decided.
 mo2      {t,instance,profile,game,mods:n,on:n,off:n,separators:n,overwrite:n,junk:n,hidden:n,rootfold:n}  mo2 only, overwrite = files kept, junk = logs and caches dropped from it, hidden = .mohidden skipped, rootfold = files unfolded from root/
-verify   {t,same:n,build:n,lost:n,diff:n}  mo2 only, every file mo2 would deploy: same = same winner after the move, build = taken by the build, lost = not deployed anymore, diff = another incoming mod wins (a bug if not 0)
+fomod    {t,kept:n,frozen:[name]}  kept = mods with installer choices written to _mod_meta.json, frozen = updates disabled in the launcher because it cannot repeat the choice
+verify   {t,same:n,build:n,lost:n,diff:n}  every file the source would deploy: same = same winner after the move, build = taken by the build, lost = not deployed anymore, diff = another incoming mod wins (a bug if not 0)
 mod      {t,i:n|null,from:"exl|vortex",action:"keep|disable|add|replace|add_off|skip",on:bool,name,dir,cat,ver,date,nid:n,note,src,dst|null}  i = load order (last wins), null for skip
 vconf    {t,file,loser,winner,cut:bool}  overlaps inside Vortex, resolved by its deployment
 scc      {t,stage:"base|final",ok:bool,files:n,errors:n,by:{"cat\name":n}}  only with --check/--apply
