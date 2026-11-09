@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { ini, inst } from './mo2.mjs';
 
 const SKIP = new Set(['_saved_configs', '_undo', '_addon_backup', '_structure_repair.json']);
 
@@ -17,14 +18,46 @@ export async function loadMods(build, stateFile, tick) {
   return out;
 }
 
-async function walk(d, r, out, tick) {
+const skipV = (r, e) => SKIP.has(e.name) || (!r && e.name.startsWith('_mod_'));
+const skipM = (r, e) => /\.mohidden$/i.test(e.name) || e.name.toLowerCase() === '.git' || (!r && /^(meta\.ini|readme\.txt|fomod)$/i.test(e.name)) || /^(root\\)?archive\\pc\\mod\\modlist\.txt$/i.test(r + e.name);
+const skipO = (r, e) => skipM(r, e) || /^(root\\)?(r6\\(cache|logs)|red4ext\\logs|logs)$|\.(log|dmp)$/i.test(r + e.name);
+
+async function walk(d, r, out, tick, skip = skipV) {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    if (SKIP.has(e.name) || (!r && e.name.startsWith('_mod_'))) continue;
+    if (skip(r, e)) continue;
     const p = path.join(d, e.name);
-    if (e.isDirectory()) await walk(p, r + e.name + '\\', out, tick);
+    if (e.isDirectory()) await walk(p, r + e.name + '\\', out, tick, skip);
     else { const s = fs.statSync(p); out.push({ rel: r + e.name, k: (r + e.name).toLowerCase(), abs: p, size: s.size, mt: Math.floor(s.mtimeMs) }); }
   }
   await tick();
+}
+
+export async function loadMo2(dir, profile, tick) {
+  const mi = inst(dir);
+  if (!mi) throw new Error('не найден ModOrganizer.ini: ' + dir);
+  const pf = profile || mi.profile;
+  let ml;
+  try { ml = fs.readFileSync(path.join(mi.pdir, pf, 'modlist.txt'), 'utf8'); } catch { throw new Error('в профиле ' + pf + ' нет modlist.txt'); }
+  const dirs = new Map(fs.readdirSync(mi.mods, { withFileTypes: true }).filter(e => e.isDirectory() && e.name[0] !== '.' && e.name.toLowerCase() !== 'overwrite' && !/_separator$|backup\d*$|^disable CrashReporter \(MO CET fix\)$/.test(e.name)).map(e => [e.name.toLowerCase(), e.name]));
+  const seen = new Map();
+  for (const l of ml.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const s = l.trim(), f = dirs.get((/^[+\-*]/.test(s) ? s.slice(1) : s).trim().toLowerCase());
+    if (s[0] !== '#' && f && !seen.has(f)) seen.set(f, s[0] !== '-');
+  }
+  const rows = [...[...seen].reverse(), ...[...dirs.values()].filter(f => !seen.has(f)).map(f => [f, false])], out = [];
+  for (let i = 0; i <= rows.length; i++) {
+    const ow = i === rows.length, [f, en] = ow ? ['Overwrite', true] : rows[i], d = ow ? mi.over : path.join(mi.mods, f), fl = [];
+    let c = {};
+    try { c = ini(fs.readFileSync(path.join(d, 'meta.ini'), 'utf8')); } catch {}
+    const x = /^(.+?)-(\d+)-\d+(?:-\d+)*-(\d{10})\.\w+$/.exec(path.basename(c.installationFile || ''));
+    const m = { id: 'MO2\\' + f, name: f, cat: 'MO2', folder: f, order: i, enabled: en, dir: d, meta: { nexusModId: +c.modid > 0 ? +c.modid : x ? +x[2] : 0, nexusName: x?.[1], nexusFileUploadedAt: x && new Date(x[3] * 1000).toISOString() }, files: [] };
+    try { await walk(d, '', fl, () => tick(i, rows.length + 1), ow ? skipO : skipM); } catch { m.missing = true; }
+    if (ow && !fl.length) continue;
+    const u = z => /^root\\/i.test(z.rel);
+    m.files = [...new Map([...fl.filter(u).map(z => ({ ...z, rel: z.rel.slice(5), k: z.k.slice(5) })), ...fl.filter(z => !u(z))].map(z => [z.k, z])).values()];
+    out.push(m);
+  }
+  return out;
 }
 
 export function modDate(m) {

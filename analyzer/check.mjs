@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fnv, hex, idx, vanilla, fingerprint, pe, cr2w, helper, unpack, names, bufRefs, spawn, sectorNodes, appLoose, pkgRefs } from './rdar.mjs';
-import { loadMods, modDate, ntfsOrder, reds, lua, yaml, tweakFlats, xlPaths, skel } from './scan.mjs';
+import { loadMods, loadMo2, modDate, ntfsOrder, reds, lua, yaml, tweakFlats, xlPaths, skel } from './scan.mjs';
 
 export const SYSTEMS = [['ui', 'Интерфейс'], ['sound', 'Звук'], ['body', 'Внешность, тело, одежда'], ['cyberware', 'Импланты'], ['weapons', 'Оружие'], ['vehicles', 'Транспорт'], ['world', 'Мир и локации'], ['npc', 'NPC и толпа'], ['quests', 'Квесты и сцены'], ['scripts', 'Скрипты'], ['tweakdb', 'Игровые данные (TweakDB)'], ['plugins', 'Нативные плагины'], ['textures', 'Текстуры и материалы'], ['lut', 'Цвет и освещение'], ['other', 'Прочее']].map(([id, label]) => ({ id, label }));
 export const SEV = ['crash', 'broken', 'risk', 'override', 'cosmetic', 'info'];
@@ -74,7 +74,7 @@ function axlLog(o, since) {
   const out = new Map(), fl = [];
   const add = d => { try { for (const n of fs.readdirSync(d)) if (/^ArchiveXL.*\.log$/i.test(n)) { const p = path.join(d, n), t = fs.statSync(p).mtimeMs; if (t >= since) fl.push([p, t]); } } catch {} };
   add(path.join(o.game, 'red4ext', 'plugins', 'ArchiveXL'));
-  try { for (const n of fs.readdirSync(path.join(o.build, '_diagnostics'))) add(path.join(o.build, '_diagnostics', n, 'red4ext', 'plugins', 'ArchiveXL')); } catch {}
+  if (o.build) try { for (const n of fs.readdirSync(path.join(o.build, '_diagnostics'))) add(path.join(o.build, '_diagnostics', n, 'red4ext', 'plugins', 'ArchiveXL')); } catch {}
   for (const [p] of fl.sort((a, b) => a[1] - b[1]).slice(-8)) {
     const th = new Map();
     let txt = '';
@@ -117,7 +117,7 @@ export async function run(o) {
   if (!fp.prev) notes.push('нет снимка прошлой версии игры - изменения ванили после патча оцениваются по датам модов');
   const dict = await names(tk('Словарь путей'));
   lap('dict');
-  const mods = await loadMods(o.build, o.state, tk('Чтение списка файлов'));
+  const mods = await (o.mo2 ? loadMo2(o.mo2, o.profile, tk('Чтение списка файлов')) : loadMods(o.build, o.state, tk('Чтение списка файлов')));
   const on = mods.filter(m => m.enabled && !m.missing);
   for (const m of mods) { m.kinds = new Set(); m.sys = new Map(); m.st = { files: m.files.length, size: m.files.reduce((a, f) => a + f.size, 0), archives: 0, res: 0, repl: 0, add: 0, lost: 0, flats: 0, reds: 0, lua: 0, dll: 0, xl: 0, issues: 0 }; m.t = modDate(m); }
   const addSys = (m, s, w = 1) => m.sys.set(s, (m.sys.get(s) || 0) + w);

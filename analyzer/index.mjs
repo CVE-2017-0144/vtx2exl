@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { run, SEV } from './check.mjs';
+import { inst } from './mo2.mjs';
 
 const cacheDir = () => path.join(process.env.LOCALAPPDATA || '.', 'vtx2exl', 'cache');
 
@@ -14,6 +15,8 @@ async function cli() {
     const k = a[i], v = () => a[++i];
     if (k === '--game') o.game = v();
     else if (k === '--build') o.build = v();
+    else if (k === '--mo2') o.mo2 = v();
+    else if (k === '--profile') o.profile = v();
     else if (k === '--state') o.state = v();
     else if (k === '--json') o.json = v();
     else if (k === '--cache') o.cache = v();
@@ -22,8 +25,9 @@ async function cli() {
     else if (k === '--quiet') o.quiet = true;
     else { console.error('неизвестный ключ: ' + k); process.exitCode = 2; return; }
   }
-  if (!o.game || !o.build) {
-    console.log('node analyzer/index.mjs --game <папка игры> --build <папка сборки> [--state <_activation_state.json>] [--json out.json] [--cache <папка>] [--no-scc]');
+  if (o.mo2 && !o.game) o.game = inst(o.mo2)?.game;
+  if (!o.game || !(o.build || o.mo2)) {
+    console.log('node analyzer/index.mjs --game <папка игры> (--build <папка сборки> | --mo2 <папка инстанса MO2> [--profile <имя>]) [--state <_activation_state.json>] [--json out.json] [--cache <папка>] [--no-scc]');
     process.exitCode = 2;
     return;
   }
